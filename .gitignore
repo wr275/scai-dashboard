@@ -1,0 +1,20 @@
+# Data — never commit the database or uploaded files
+scai_data.db
+SCAI_Dashboard_Data/
+uploaded_files/
+*.db
+*.db-shm
+*.db-wal
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+.write_test

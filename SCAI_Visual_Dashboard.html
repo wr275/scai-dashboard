@@ -581,14 +581,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-primary);color
 'use strict';
 
 // ─── CONSTANTS ─────────────────────────────────────────────────────────────────
-const VERTICALS = ['ICT','SC Solutions','Innovation, Partnership & Platforms','Strategy & Planning','AI & Data'];
-const VERTICAL_OWNERS = {
-  'ICT': 'Mishari Alsaddi',
-  'SC Solutions': 'Youssouf Mouhamedou',
-  'Innovation, Partnership & Platforms': 'Mohammad Alaboodi',
-  'Strategy & Planning': 'Ahmad Alsadoun',
-  'AI & Data': 'Mohammad Alaboodi'
-};
+const VERTICALS = ['ICT','Smart City Solutions','Digital Twins, Innovation & Platforms','Strategy & Planning','AI & Data'];
 const PHASES    = ['Initiation','Planning','Execution','Review & Approval','Deployment','Closed'];
 const STATUS_COLORS = {'On Track':'#29BA74','At Risk':'#F89862','Blocked':'#E71C57','Complete':'#30C1D7','Not Started':'#9A9A9A'};
 const RAG_CLASS     = {'On Track':'rag-green','At Risk':'rag-orange','Blocked':'rag-red','Complete':'rag-blue','Not Started':'rag-grey'};
@@ -1238,10 +1231,7 @@ function renderSidebar() {
     h += `<div class="vgroup${isOpen?' expanded':''}" id="vg-${pid}">`;
     h += `<div class="nav-item nav-vertical${pg===pid?' active':''}" onclick="toggleVGroup('${pid}');nav('${pid}')">
       <span class="nav-dot" style="background:${col}"></span>
-      <span style="flex:1">
-        <span style="display:block">${v}</span>
-        <span style="display:block;font-size:10px;opacity:0.65;font-weight:400;margin-top:1px">${VERTICAL_OWNERS[v]||''}</span>
-      </span>
+      <span style="flex:1">${v}</span>
       <span class="nav-chevron">&#8250;</span>
     </div>`;
     h += `<div class="nav-sub">`;
@@ -1685,7 +1675,6 @@ function pageVertical(v) {
       <div>
         <div class="page-title">${v}</div>
         <div class="page-subtitle">Smart City &amp; AI &middot; New Murabba Development Company</div>
-        ${VERTICAL_OWNERS[v] ? `<div class="page-subtitle" style="margin-top:4px">&#128100; Department Owner: <strong>${VERTICAL_OWNERS[v]}</strong></div>` : ''}
       </div>
       ${ragBadge(vs)}
     </div>

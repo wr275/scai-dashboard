@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: scai-dashboard
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/status
+    envVars:
+      - key: DATA_DIR
+        value: /var/data
+      - key: DASHBOARD_USR
+        value: scai
+      - key: DASHBOARD_PWD
+        generateValue: true   # Render auto-generates a secure password
+
+disk:
+  - name: scai-data
+    mountPath: /var/data
+    sizeGB: 1
