@@ -65,10 +65,15 @@ DB_PATH    = DATA_DIR / 'scai_data.db'
 UPLOAD_DIR = DATA_DIR / 'uploaded_files'
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# Auth (optional — only active when DASHBOARD_PWD is set)
+# Auth — admin credentials (full access)
 AUTH_USER = os.environ.get('DASHBOARD_USR', 'scai')
 AUTH_PWD  = os.environ.get('DASHBOARD_PWD', '')   # empty = no auth
 AUTH_ON   = bool(AUTH_PWD)
+
+# Auth — owner credentials (read dashboard + submit weekly updates only)
+OWNER_USR = os.environ.get('OWNER_USR', 'owner')
+OWNER_PWD = os.environ.get('OWNER_PWD', '')       # empty = owner login disabled
+OWNER_ON  = bool(OWNER_PWD)
 
 # Email config (optional — only active when EMAIL_FROM + EMAIL_APP_PWD are set)
 EMAIL_FROM      = os.environ.get('EMAIL_FROM', '')
@@ -98,24 +103,43 @@ app.add_middleware(
 security = HTTPBasic(auto_error=False)
 
 
-def require_auth(credentials: HTTPBasicCredentials = Depends(security)):
-    """Dependency: enforce basic auth when DASHBOARD_PWD is set."""
-    if not AUTH_ON:
-        return  # auth disabled
+def _creds_match(creds: HTTPBasicCredentials, usr: str, pwd: str) -> bool:
+    return (secrets.compare_digest(creds.username.encode(), usr.encode()) and
+            secrets.compare_digest(creds.password.encode(), pwd.encode()))
+
+
+def get_role(credentials: HTTPBasicCredentials = Depends(security)) -> str:
+    """Returns 'admin' or 'owner'. Raises 401/403 on bad/missing credentials."""
+    if not AUTH_ON and not OWNER_ON:
+        return 'admin'   # no auth configured → open access
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail='Authentication required',
             headers={'WWW-Authenticate': 'Basic realm="SCAI Dashboard"'},
         )
-    ok_user = secrets.compare_digest(credentials.username.encode(), AUTH_USER.encode())
-    ok_pass = secrets.compare_digest(credentials.password.encode(), AUTH_PWD.encode())
-    if not (ok_user and ok_pass):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='Incorrect username or password',
-            headers={'WWW-Authenticate': 'Basic realm="SCAI Dashboard"'},
-        )
+    if AUTH_ON and _creds_match(credentials, AUTH_USER, AUTH_PWD):
+        return 'admin'
+    if OWNER_ON and _creds_match(credentials, OWNER_USR, OWNER_PWD):
+        return 'owner'
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail='Incorrect username or password',
+        headers={'WWW-Authenticate': 'Basic realm="SCAI Dashboard"'},
+    )
+
+
+def require_auth(role: str = Depends(get_role)) -> str:
+    """Allows admin or owner."""
+    return role
+
+
+def require_admin(role: str = Depends(get_role)) -> str:
+    """Admin-only routes (upload, delete)."""
+    if role != 'admin':
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail='Admin access required')
+    return role
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
@@ -230,7 +254,7 @@ async def api_get_project(pid: str):
     return proj
 
 
-@app.delete('/api/projects/{pid}', dependencies=[Depends(require_auth)])
+@app.delete('/api/projects/{pid}', dependencies=[Depends(require_admin)])
 async def api_delete_project(pid: str):
     pid = pid.upper()
     with get_conn() as conn:
@@ -241,7 +265,7 @@ async def api_delete_project(pid: str):
     return {'deleted': pid}
 
 
-@app.post('/api/upload', dependencies=[Depends(require_auth)])
+@app.post('/api/upload', dependencies=[Depends(require_admin)])
 async def api_upload(files: list[UploadFile] = File(...)):
     results, errors = [], []
 
@@ -307,13 +331,74 @@ async def api_upload(files: list[UploadFile] = File(...)):
     return {'saved': len(results), 'errors': len(errors), 'results': results, 'errorDetails': errors}
 
 
-@app.get('/api/upload-log', dependencies=[Depends(require_auth)])
+@app.get('/api/upload-log', dependencies=[Depends(require_admin)])
 async def api_upload_log(limit: int = 50):
     with get_conn() as conn:
         rows = conn.execute(
             'SELECT * FROM upload_log ORDER BY log_id DESC LIMIT ?', (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+@app.get('/api/role')
+async def api_role(role: str = Depends(get_role)):
+    """Returns the current user's role so the frontend can adjust the UI."""
+    return {'role': role}
+
+
+@app.post('/api/weekly-update')
+async def api_weekly_update(payload: dict, role: str = Depends(require_auth)):
+    """Owner or admin: submit / overwrite this week's project update."""
+    pid = (payload.get('projectId') or '').upper()
+    if not pid:
+        raise HTTPException(400, 'projectId is required')
+
+    proj = get_project(pid)
+    if not proj:
+        raise HTTPException(404, f'Project {pid} not found')
+
+    week_date = payload.get('weekDate', '')
+    if not week_date:
+        raise HTTPException(400, 'weekDate is required (YYYY-MM-DD)')
+
+    has_blocker = bool(payload.get('hasBlocker', False))
+    new_update = {
+        'weekDate':     week_date,
+        'progress':     int(payload.get('progress', 0)),
+        'comment':      payload.get('comment', ''),
+        'thisWeek':     payload.get('comment', ''),   # shown in "This Week" block
+        'nextWeek':     payload.get('nextWeek', ''),
+        'hasBlocker':   has_blocker,
+        'blockerDetail': payload.get('blockerDetail', '') if has_blocker else '',
+    }
+
+    # Upsert into weeklyUpdates (replace entry for same weekDate if exists)
+    updates = proj.get('weeklyUpdates', [])
+    idx = next((i for i, u in enumerate(updates) if u.get('weekDate') == week_date), None)
+    if idx is not None:
+        updates[idx] = new_update
+    else:
+        updates.append(new_update)
+    updates.sort(key=lambda u: u.get('weekDate', ''))
+    proj['weeklyUpdates'] = updates
+
+    # Upsert milestone tracker entries
+    tracker = {t['milestoneId']: t for t in proj.get('milestoneTracker', [])}
+    for m in payload.get('milestones', []):
+        mid = m.get('milestoneId')
+        if not mid:
+            continue
+        entry = {'milestoneId': mid, 'status': m.get('status', 'Not Started')}
+        if m.get('status') == 'Complete':
+            entry['completedDate'] = week_date
+        elif mid in tracker and tracker[mid].get('status') == 'Complete':
+            entry['completedDate'] = tracker[mid].get('completedDate', '')
+        tracker[mid] = entry
+    proj['milestoneTracker'] = list(tracker.values())
+
+    upsert_project(proj)
+    log.info(f'Weekly update submitted: {pid} week={week_date} role={role}')
+    return {'ok': True, 'projectId': pid, 'weekDate': week_date}
 
 
 @app.get('/api/status')   # no auth — used as health check by cloud platforms

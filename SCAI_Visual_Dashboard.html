@@ -497,6 +497,34 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-primary);color
 .trend-card{margin-bottom:14px;}
 .trend-card canvas{max-height:220px;}
 
+/* ── OWNER UPDATE MODAL ── */
+.update-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px;}
+.update-modal{background:var(--bg-card);border:1px solid var(--border-color);border-radius:14px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.4);}
+.update-modal-header{padding:20px 24px 14px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:flex-start;}
+.update-modal-title{font-size:15px;font-weight:800;color:var(--text-primary);}
+.update-modal-sub{font-size:11px;color:var(--text-muted);margin-top:3px;}
+.update-modal-body{padding:20px 24px;}
+.update-form-group{margin-bottom:18px;}
+.update-form-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:6px;display:block;}
+.update-form-input{width:100%;box-sizing:border-box;background:var(--bg-main);border:1px solid var(--border-color);border-radius:8px;padding:9px 12px;font-size:13px;color:var(--text-primary);font-family:inherit;outline:none;transition:border-color .2s;}
+.update-form-input:focus{border-color:var(--gold-primary);}
+textarea.update-form-input{resize:vertical;min-height:72px;}
+.update-progress-row{display:flex;align-items:center;gap:10px;}
+.update-progress-row input[type=range]{flex:1;accent-color:var(--gold-primary);}
+.update-progress-num{width:52px;text-align:center;}
+.update-blocker-toggle{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;}
+.update-blocker-toggle input[type=checkbox]{width:16px;height:16px;accent-color:var(--status-blocked);cursor:pointer;}
+.update-ms-list{display:flex;flex-direction:column;gap:8px;max-height:220px;overflow-y:auto;}
+.update-ms-item{display:flex;align-items:center;gap:10px;background:var(--bg-main);border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;}
+.update-ms-name{flex:1;font-size:12px;color:var(--text-primary);}
+.update-ms-select{background:var(--bg-card);border:1px solid var(--border-color);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text-primary);cursor:pointer;}
+.update-modal-footer{padding:14px 24px 20px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid var(--border-color);}
+.update-submit-btn{background:var(--gold-primary);color:#1A1A2E;border:none;border-radius:8px;padding:10px 24px;font-size:13px;font-weight:800;cursor:pointer;transition:opacity .2s;}
+.update-submit-btn:hover{opacity:.88;}
+.update-submit-btn:disabled{opacity:.45;cursor:not-allowed;}
+.owner-update-btn{display:inline-flex;align-items:center;gap:6px;background:var(--gold-primary);color:#1A1A2E;border:none;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer;margin-left:auto;transition:opacity .2s;}
+.owner-update-btn:hover{opacity:.88;}
+
 /* ── WEEKLY SUMMARY PAGE ── */
 .ws-header{background:var(--dark-navy,#1A1A2E);color:#C9A84C;padding:18px 24px;border-radius:10px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;}
 .ws-header-title{font-size:20px;font-weight:800;letter-spacing:.5px;}
@@ -937,7 +965,7 @@ const DEMO_PROJECTS = [
 // When opened as file:// → IS_API_MODE = false → local SheetJS parse (offline mode)
 const IS_API_MODE = window.location.protocol !== 'file:';
 
-let state = { projects: [...DEMO_PROJECTS], isDemo: true, page: 'executive', theme: 'light', charts: {}, searchQuery: '' };
+let state = { projects: [...DEMO_PROJECTS], isDemo: true, page: 'executive', theme: 'light', charts: {}, searchQuery: '', role: 'admin' };
 
 // ─── CALC FUNCTIONS ────────────────────────────────────────────────────────────
 function getMsStatus(proj, mid) {
@@ -1301,11 +1329,18 @@ function toggleVGroup(pid) { const el=document.getElementById('vg-'+pid); if(el)
 // ─── API MODE ──────────────────────────────────────────────────────────────────
 async function apiLoadProjects() {
   try {
-    const resp = await fetch('/api/projects');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const projects = await resp.json();
+    const [projResp, roleResp] = await Promise.all([
+      fetch('/api/projects'),
+      fetch('/api/role')
+    ]);
+    if (!projResp.ok) throw new Error('HTTP ' + projResp.status);
+    const projects = await projResp.json();
     state.projects = projects.length ? projects : [];
     state.isDemo   = false;
+    if (roleResp.ok) {
+      const rd = await roleResp.json();
+      state.role = rd.role || 'admin';
+    }
     renderSidebar();
     renderPage();
     updateServerBadge(true);
@@ -1351,6 +1386,131 @@ async function apiDeleteProject(pid) {
     nav('executive');
   } catch (e) {
     showToast('Delete failed: ' + e.message, 5000);
+  }
+}
+
+// ─── OWNER: WEEKLY UPDATE FORM ─────────────────────────────────────────────────
+function currentMondayISO() {
+  const d = new Date();
+  const day = d.getDay(); // 0=Sun
+  d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+  return d.toISOString().slice(0, 10);
+}
+
+function showUpdateForm(projId) {
+  const proj = state.projects.find(p => p.id === projId);
+  if (!proj) return;
+  const weekDate = currentMondayISO();
+  const existing = (proj.weeklyUpdates || []).find(u => u.weekDate === weekDate) || {};
+  const tracker  = {};
+  (proj.milestoneTracker || []).forEach(t => { tracker[t.milestoneId] = t.status || 'Not Started'; });
+  const vertCol  = VERTICAL_COLORS[proj.vertical] || 'var(--gold-primary)';
+
+  const msHtml = (proj.milestones || []).map(m => {
+    const cur = tracker[m.id] || 'Not Started';
+    return `<div class="update-ms-item">
+      <div class="update-ms-name">${m.name}</div>
+      <select class="update-ms-select" data-msid="${m.id}">
+        <option value="Not Started"${cur==='Not Started'?' selected':''}>Not Started</option>
+        <option value="In Progress"${cur==='In Progress'?' selected':''}>In Progress</option>
+        <option value="Complete"${cur==='Complete'?' selected':''}>Complete</option>
+      </select>
+    </div>`;
+  }).join('');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'update-modal-overlay';
+  overlay.id = 'updateModalOverlay';
+  overlay.innerHTML = `
+    <div class="update-modal" onclick="event.stopPropagation()">
+      <div class="update-modal-header">
+        <div>
+          <div class="update-modal-title" style="color:${vertCol}">${proj.name}</div>
+          <div class="update-modal-sub">Weekly update &nbsp;·&nbsp; Week of ${weekDate} &nbsp;·&nbsp; ${proj.vertical}</div>
+        </div>
+        <button onclick="closeUpdateForm()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted);line-height:1">&times;</button>
+      </div>
+      <div class="update-modal-body">
+        <div class="update-form-group">
+          <label class="update-form-label">Overall Progress %</label>
+          <div class="update-progress-row">
+            <input type="range" min="0" max="100" value="${existing.progress ?? proj.plannedProgress?.[proj.plannedProgress?.length-1]?.pct ?? 0}"
+              id="upd-progress-range" oninput="document.getElementById('upd-progress-num').value=this.value">
+            <input type="number" min="0" max="100" class="update-form-input update-progress-num" id="upd-progress-num"
+              value="${existing.progress ?? 0}" oninput="document.getElementById('upd-progress-range').value=this.value">
+            <span style="font-size:13px;color:var(--text-muted)">%</span>
+          </div>
+        </div>
+        <div class="update-form-group">
+          <label class="update-form-label">This Week — What was accomplished?</label>
+          <textarea class="update-form-input" id="upd-comment" placeholder="Describe what was done this week…">${existing.comment || existing.thisWeek || ''}</textarea>
+        </div>
+        <div class="update-form-group">
+          <label class="update-form-label">Next Week — What is planned?</label>
+          <textarea class="update-form-input" id="upd-next" placeholder="Outline next week's focus…" style="min-height:56px">${existing.nextWeek || ''}</textarea>
+        </div>
+        <div class="update-form-group">
+          <label class="update-form-label">Blockers</label>
+          <label class="update-blocker-toggle" style="margin-bottom:10px">
+            <input type="checkbox" id="upd-has-blocker" ${existing.hasBlocker ? 'checked' : ''}
+              onchange="document.getElementById('upd-blocker-detail-row').style.display=this.checked?'block':'none'">
+            <span style="font-size:13px">There is an active blocker</span>
+          </label>
+          <div id="upd-blocker-detail-row" style="display:${existing.hasBlocker ? 'block' : 'none'}">
+            <textarea class="update-form-input" id="upd-blocker-detail" placeholder="Describe the blocker and what is needed to resolve it…">${existing.blockerDetail || ''}</textarea>
+          </div>
+        </div>
+        ${proj.milestones && proj.milestones.length ? `
+        <div class="update-form-group">
+          <label class="update-form-label">Milestone Status</label>
+          <div class="update-ms-list">${msHtml}</div>
+        </div>` : ''}
+      </div>
+      <div class="update-modal-footer">
+        <button onclick="closeUpdateForm()" style="background:none;border:1px solid var(--border-color);border-radius:8px;padding:10px 20px;font-size:13px;cursor:pointer;color:var(--text-primary)">Cancel</button>
+        <button class="update-submit-btn" id="upd-submit-btn" onclick="apiSubmitUpdate('${proj.id}','${weekDate}')">&#10003; Submit Update</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', closeUpdateForm);
+  document.body.appendChild(overlay);
+}
+
+function closeUpdateForm() {
+  const el = document.getElementById('updateModalOverlay');
+  if (el) el.remove();
+}
+
+async function apiSubmitUpdate(projId, weekDate) {
+  const btn = document.getElementById('upd-submit-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
+  const milestones = [...document.querySelectorAll('.update-ms-select')].map(sel => ({
+    milestoneId: sel.dataset.msid,
+    status: sel.value
+  }));
+  const payload = {
+    projectId:    projId,
+    weekDate:     weekDate,
+    progress:     parseInt(document.getElementById('upd-progress-num').value) || 0,
+    comment:      document.getElementById('upd-comment').value.trim(),
+    nextWeek:     document.getElementById('upd-next').value.trim(),
+    hasBlocker:   document.getElementById('upd-has-blocker').checked,
+    blockerDetail:document.getElementById('upd-blocker-detail') ? document.getElementById('upd-blocker-detail').value.trim() : '',
+    milestones
+  };
+  try {
+    const resp = await fetch('/api/weekly-update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) throw new Error('Server error ' + resp.status);
+    closeUpdateForm();
+    showToast('✓ Update saved for ' + projId + ' — week of ' + weekDate, 6000);
+    await apiLoadProjects();
+    nav('p-' + projId.toLowerCase());
+  } catch (e) {
+    showToast('Submit failed: ' + e.message, 6000);
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Submit Update'; }
   }
 }
 
@@ -1947,7 +2107,8 @@ function pageProject(proj) {
       <a onclick="nav('${vpid}')">${proj.vertical}</a>
       <span class="bc-sep">&rsaquo;</span>
       <span>${proj.name}</span>
-      ${IS_API_MODE ? `<button class="btn-danger" style="margin-left:auto;font-size:11px;padding:4px 10px" onclick="apiDeleteProject('${proj.id}')">&#128465; Remove from server</button>` : ''}
+      ${IS_API_MODE && state.role === 'admin' ? `<button class="btn-danger" style="margin-left:auto;font-size:11px;padding:4px 10px" onclick="apiDeleteProject('${proj.id}')">&#128465; Remove from server</button>` : ''}
+      ${IS_API_MODE ? `<button class="owner-update-btn" style="${state.role==='admin'?'margin-left:8px':'margin-left:auto'}" onclick="showUpdateForm('${proj.id}')">&#128393; Submit Weekly Update</button>` : ''}
     </div>
     <div class="project-detail-header">
       <div class="pd-hero">
