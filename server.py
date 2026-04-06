@@ -394,9 +394,10 @@ def build_weekly_summary_html(projects: list) -> str:
         for a in achievements[:8]
     ) or '<li>No updates submitted yet</li>'
 
+    _fallback_color = '#9A9A9A'
     kpi_cells = ''.join(
         f'<td style="text-align:center;padding:12px 16px">'
-        f'<div style="font-size:28px;font-weight:900;color:{rag_color.get(k,\"#9A9A9A\")}">{v}</div>'
+        f'<div style="font-size:28px;font-weight:900;color:{rag_color.get(k, _fallback_color)}">{v}</div>'
         f'<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#999;margin-top:3px">{k}</div>'
         f'</td>'
         for k, v in by_rag.items()
