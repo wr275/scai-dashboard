@@ -495,7 +495,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-primary);color
 
 /* ── RAG TREND CHART ── */
 .trend-card{margin-bottom:14px;}
-.trend-card canvas{max-height:160px;}
+.trend-card canvas{max-height:220px;}
 
 /* ── WEEKLY SUMMARY PAGE ── */
 .ws-header{background:var(--dark-navy,#1A1A2E);color:#C9A84C;padding:18px 24px;border-radius:10px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;}
@@ -620,6 +620,20 @@ const VERTICAL_OWNERS = {
 };
 const PHASES    = ['Initiation','Planning','Execution','Review & Approval','Deployment','Closed'];
 const STATUS_COLORS = {'On Track':'#29BA74','At Risk':'#F89862','Blocked':'#E71C57','Complete':'#30C1D7','Not Started':'#9A9A9A'};
+const VERTICAL_COLORS = {
+  'ICT':                                 '#4F8EF7',
+  'SC Solutions':                        '#B061F5',
+  'Innovation, Partnership & Platforms': '#F97316',
+  'Strategy & Planning':                 '#10C4A8',
+  'AI & Data':                           '#EC4899'
+};
+const VERTICAL_SHORT = {
+  'ICT':                                 'ICT',
+  'SC Solutions':                        'SC Solutions',
+  'Innovation, Partnership & Platforms': 'Innovation',
+  'Strategy & Planning':                 'Strategy',
+  'AI & Data':                           'AI & Data'
+};
 const RAG_CLASS     = {'On Track':'rag-green','At Risk':'rag-orange','Blocked':'rag-red','Complete':'rag-blue','Not Started':'rag-grey'};
 const HC_CLASS      = {'On Track':'hc-green', 'At Risk':'hc-orange', 'Blocked':'hc-red', 'Complete':'hc-blue','Not Started':'hc-grey'};
 const ACCENT_CLASS  = {'On Track':'pc-accent-green','At Risk':'pc-accent-amber','Blocked':'pc-accent-red','Complete':'pc-accent-blue','Not Started':'pc-accent-grey'};
@@ -1256,7 +1270,7 @@ function renderSidebar() {
   VERTICALS.forEach(v => {
     const pid  = vertPageId(v);
     const vs   = verticalStatus(v);
-    const col  = STATUS_COLORS[vs]||'#9A9A9A';
+    const col  = VERTICAL_COLORS[v]||'#9A9A9A';
     const projs = projectsForVertical(v);
     const isOpen = pg===pid || projs.some(p => pg==='p-'+p.id);
     h += `<div class="vgroup${isOpen?' expanded':''}" id="vg-${pid}">`;
@@ -1484,7 +1498,7 @@ function projectCardHtml(p, hideVertical=false) {
       <span class="pc-phase-pill">${ph}</span>
     </div>
     <div class="pc-name">${p.name}</div>
-    ${hideVertical ? '' : `<div class="pc-vertical">${p.vertical}</div>`}
+    ${hideVertical ? '' : `<div class="pc-vertical" style="color:${VERTICAL_COLORS[p.vertical]||'var(--gold-light)'}">${p.vertical}</div>`}
     <div class="pc-ring-row">
       <div class="pc-ring">${svgRing(pc, col, 22, 5, 54)}</div>
       <div class="pc-ring-info">
@@ -1511,11 +1525,10 @@ function pageExecutive() {
   const vertBars = VERTICALS.map(v => {
     const pjs = projectsForVertical(v);
     const avg = vertAvgPct(v);
-    const vs  = verticalStatus(v);
-    const col = STATUS_COLORS[vs]||'#9A9A9A';
+    const col = VERTICAL_COLORS[v]||'#9A9A9A';
     return `<div class="vert-bar-item">
       <div class="vert-bar-header">
-        <span class="vert-bar-name" style="cursor:pointer" onclick="nav('${vertPageId(v)}')">${v}</span>
+        <span class="vert-bar-name" style="cursor:pointer;color:${col}" onclick="nav('${vertPageId(v)}')">${v}</span>
         <span class="vert-bar-meta">${pjs.length} proj · <strong style="color:${col}">${avg}%</strong></span>
       </div>
       <div class="vert-bar-track"><div class="vert-bar-fill" style="width:${avg}%;background:${col}"></div></div>
@@ -1546,13 +1559,14 @@ function pageExecutive() {
     ${RAG_LEGEND_HTML}
     <div class="vert-cards-row">
       ${VERTICALS.map(v => {
-        const pjs  = projectsForVertical(v);
-        const vs   = verticalStatus(v);
-        const col  = STATUS_COLORS[vs]||'#9A9A9A';
-        const bgCol= vs==='On Track' ? 'rgba(41,186,116,.12)' :
-                     vs==='Blocked'  ? 'rgba(231,28,87,.12)' :
-                     vs==='At Risk'  ? 'rgba(248,152,98,.12)' :
-                     vs==='Complete' ? 'rgba(48,193,215,.12)' : 'rgba(154,154,154,.1)';
+        const pjs    = projectsForVertical(v);
+        const vs     = verticalStatus(v);
+        const vCol   = VERTICAL_COLORS[v]||'#9A9A9A';
+        const ragCol = STATUS_COLORS[vs]||'#9A9A9A';
+        const bgCol  = vs==='On Track' ? 'rgba(41,186,116,.12)' :
+                       vs==='Blocked'  ? 'rgba(231,28,87,.12)' :
+                       vs==='At Risk'  ? 'rgba(248,152,98,.12)' :
+                       vs==='Complete' ? 'rgba(48,193,215,.12)' : 'rgba(154,154,154,.1)';
         const onT  = pjs.filter(p=>calcRAG(p)==='On Track').length;
         const atR  = pjs.filter(p=>calcRAG(p)==='At Risk').length;
         const blk  = pjs.filter(p=>calcRAG(p)==='Blocked').length;
@@ -1562,10 +1576,10 @@ function pageExecutive() {
         if (blk)  stats += `<div><span style="color:var(--status-blocked)">${blk} blocked</span></div>`;
         if (onT)  stats += `<div><span style="color:var(--status-on-track)">${onT} on track</span></div>`;
         if (done) stats += `<div><span style="color:var(--status-complete)">${done} done</span></div>`;
-        return `<div class="vert-card" style="border-top-color:${col}" onclick="nav('${vertPageId(v)}')">
-          <div class="vert-card-name">${v}</div>
-          <div class="vert-card-badge" style="background:${bgCol};color:${col}">
-            <span style="width:7px;height:7px;border-radius:50%;background:${col};display:inline-block"></span>
+        return `<div class="vert-card" style="border-top-color:${vCol};border-top-width:3px" onclick="nav('${vertPageId(v)}')">
+          <div class="vert-card-name" style="color:${vCol}">${v}</div>
+          <div class="vert-card-badge" style="background:${bgCol};color:${ragCol}">
+            <span style="width:7px;height:7px;border-radius:50%;background:${vCol};display:inline-block"></span>
             ${vs}
           </div>
           <div class="vert-card-stats">${stats}</div>
@@ -1624,7 +1638,7 @@ function pageExecutive() {
         </span>
         <span style="font-size:10px;opacity:0.4;margin-left:auto">On Track=100 &middot; At Risk=50 &middot; Blocked=0 &middot; Complete=100</span>
       </div>
-      <canvas id="rag-trend-chart" height="140"></canvas>
+      <canvas id="rag-trend-chart" height="190"></canvas>
     </div>
     <div class="section-sep">All Projects &mdash; ${s.total} projects</div>
     <div class="projects-grid">${projectCards}</div>`;
@@ -1643,7 +1657,7 @@ function pageWeeklySummary() {
     if (!pjs.length) return '';
     const avg = vertAvgPct(v);
     const vs  = verticalStatus(v);
-    const col = STATUS_COLORS[vs]||'#9A9A9A';
+    const col = VERTICAL_COLORS[v]||'#9A9A9A';
     const blk = pjs.filter(p=>calcRAG(p)==='Blocked').length;
     const atr = pjs.filter(p=>calcRAG(p)==='At Risk').length;
     const onT = pjs.filter(p=>calcRAG(p)==='On Track').length;
@@ -1762,6 +1776,8 @@ function ragTrendData() {
   const weeks = [...weekSet].sort().slice(-10);
   return weeks.map(week => {
     let onTrack=0, atRisk=0, blocked=0, complete=0, total=0;
+    const byVert = {};
+    VERTICALS.forEach(v => { byVert[v] = {onTrack:0,atRisk:0,blocked:0,complete:0,total:0}; });
     state.projects.forEach(p => {
       const upd = (p.weeklyUpdates||[]).find(u=>u.weekDate===week);
       if (!upd) return;
@@ -1772,9 +1788,22 @@ function ragTrendData() {
       else if (rag==='Blocked') blocked++;
       else if (rag==='Complete') complete++;
       else onTrack++;
+      if (p.vertical && byVert[p.vertical]) {
+        const bv = byVert[p.vertical]; bv.total++;
+        if (rag==='On Track') bv.onTrack++;
+        else if (rag==='At Risk') bv.atRisk++;
+        else if (rag==='Blocked') bv.blocked++;
+        else if (rag==='Complete') bv.complete++;
+        else bv.onTrack++;
+      }
     });
     const score = total > 0 ? Math.round(((onTrack*100 + atRisk*50 + complete*100) / (total*100)) * 100) : null;
-    return { week, onTrack, atRisk, blocked, complete, total, score };
+    const vertScores = {};
+    VERTICALS.forEach(v => {
+      const bv = byVert[v];
+      vertScores[v] = bv.total > 0 ? Math.round(((bv.onTrack*100 + bv.atRisk*50 + bv.complete*100) / (bv.total*100)) * 100) : null;
+    });
+    return { week, onTrack, atRisk, blocked, complete, total, score, vertScores };
   });
 }
 
@@ -2038,7 +2067,7 @@ function buildCharts() {
     </svg>`;
   }
 
-  // Health Score Line chart (Executive Overview)
+  // Health Score Line chart — Portfolio aggregate + per-vertical lines
   const ragTrendEl = document.getElementById('rag-trend-chart');
   if (ragTrendEl) {
     const td = ragTrendData();
@@ -2049,26 +2078,56 @@ function buildCharts() {
       const scoreCol = latestScore >= 70 ? '#29BA74' : latestScore >= 40 ? '#F89862' : '#E71C57';
       const badge = document.getElementById('health-score-badge');
       if (badge) { badge.textContent = latestScore + '%'; badge.style.color = scoreCol; }
-      const ctx = ragTrendEl.getContext('2d');
-      const gradFill = ctx.createLinearGradient(0, 0, 0, 140);
-      gradFill.addColorStop(0, 'rgba(41,186,116,0.3)');
-      gradFill.addColorStop(0.5, 'rgba(248,152,98,0.15)');
-      gradFill.addColorStop(1, 'rgba(231,28,87,0.04)');
+      // Portfolio aggregate dataset (gold, thick)
+      const portfolioDS = {
+        label: 'Portfolio',
+        data: scores,
+        borderColor: '#C9A84C',
+        backgroundColor: 'rgba(201,168,76,0.08)',
+        borderWidth: 3,
+        pointRadius: 4,
+        pointBackgroundColor: scores.map(s => s>=70?'#29BA74':s>=40?'#F89862':'#E71C57'),
+        pointBorderColor: '#fff', pointBorderWidth: 1.5,
+        tension: 0.4, fill: true, order: 0
+      };
+      // Per-vertical datasets (thin coloured lines)
+      const vertDatasets = VERTICALS.map(v => ({
+        label: VERTICAL_SHORT[v]||v,
+        data: td.map(d => d.vertScores[v]),
+        borderColor: VERTICAL_COLORS[v]||'#9A9A9A',
+        backgroundColor: 'transparent',
+        borderWidth: 1.8,
+        pointRadius: 3,
+        pointBackgroundColor: VERTICAL_COLORS[v]||'#9A9A9A',
+        pointBorderColor: 'transparent',
+        tension: 0.4, fill: false, spanGaps: true, order: 1
+      }));
       state.charts['rag-trend'] = new Chart(ragTrendEl, {
         type: 'line',
-        data: { labels, datasets: [{ label:'Health Score', data: scores,
-          borderColor: scoreCol, backgroundColor: gradFill,
-          borderWidth: 2.5, pointRadius: 5,
-          pointBackgroundColor: scores.map(s => s>=70 ? '#29BA74' : s>=40 ? '#F89862' : '#E71C57'),
-          pointBorderColor: '#fff', pointBorderWidth: 1.5, tension: 0.4, fill: true }] },
+        data: { labels, datasets: [portfolioDS, ...vertDatasets] },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: {
-            legend: { display: false },
-            tooltip: { callbacks: {
-              label: c => 'Health: ' + c.raw + '%',
-              afterLabel: c => { const d=td[c.dataIndex]; return 'On Track:'+d.onTrack+'  At Risk:'+d.atRisk+'  Blocked:'+d.blocked+'  Complete:'+d.complete; }
-            }}
+            legend: { display: true, position: 'bottom',
+              labels: { color: cd.color, boxWidth: 10, boxHeight: 3, font: { size: 10 }, padding: 10,
+                generateLabels(chart) {
+                  return chart.data.datasets.map((ds,i) => ({
+                    text: ds.label,
+                    fillStyle: ds.borderColor,
+                    strokeStyle: ds.borderColor,
+                    lineWidth: ds.borderWidth,
+                    hidden: !chart.isDatasetVisible(i),
+                    datasetIndex: i
+                  }));
+                }
+              }
+            },
+            tooltip: {
+              mode: 'index', intersect: false,
+              callbacks: {
+                label: c => ` ${c.dataset.label}: ${c.raw != null ? c.raw+'%' : '—'}`
+              }
+            }
           },
           scales: {
             x: { grid:{color:cd.grid}, ticks:{color:cd.color,font:{size:10}} },
