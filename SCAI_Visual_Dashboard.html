@@ -495,7 +495,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-primary);color
 
 /* ── RAG TREND CHART ── */
 .trend-card{margin-bottom:14px;}
-.trend-card canvas{max-height:180px;}
+.trend-card canvas{max-height:160px;}
 
 /* ── WEEKLY SUMMARY PAGE ── */
 .ws-header{background:var(--dark-navy,#1A1A2E);color:#C9A84C;padding:18px 24px;border-radius:10px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;}
@@ -1604,8 +1604,12 @@ function pageExecutive() {
       </div>
     </div>
     <div class="card trend-card" style="margin-bottom:14px">
-      <div class="card-title">Portfolio RAG Trend &mdash; Week-on-Week Health</div>
-      <canvas id="rag-trend-chart" height="160"></canvas>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div class="card-title" style="margin-bottom:0">Portfolio Health Score &mdash; Week-on-Week</div>
+        <div id="health-score-badge" style="font-size:28px;font-weight:900;line-height:1"></div>
+      </div>
+      <div style="font-size:10px;opacity:0.45;margin-bottom:10px">On Track = 100 &nbsp;&middot;&nbsp; At Risk = 50 &nbsp;&middot;&nbsp; Blocked = 0 &nbsp;&middot;&nbsp; Complete = 100</div>
+      <canvas id="rag-trend-chart" height="140"></canvas>
     </div>
     <div class="section-sep">All Projects &mdash; ${s.total} projects</div>
     <div class="projects-grid">${projectCards}</div>`;
@@ -1742,10 +1746,11 @@ function ragTrendData() {
   state.projects.forEach(p => (p.weeklyUpdates||[]).forEach(u => { if(u.weekDate) weekSet.add(u.weekDate); }));
   const weeks = [...weekSet].sort().slice(-10);
   return weeks.map(week => {
-    let onTrack=0, atRisk=0, blocked=0, complete=0;
+    let onTrack=0, atRisk=0, blocked=0, complete=0, total=0;
     state.projects.forEach(p => {
       const upd = (p.weeklyUpdates||[]).find(u=>u.weekDate===week);
       if (!upd) return;
+      total++;
       const rag = upd.ragOverride || (upd.hasBlocker ? 'Blocked' : 'On Track');
       if (rag==='On Track') onTrack++;
       else if (rag==='At Risk') atRisk++;
@@ -1753,7 +1758,8 @@ function ragTrendData() {
       else if (rag==='Complete') complete++;
       else onTrack++;
     });
-    return { week, onTrack, atRisk, blocked, complete };
+    const score = total > 0 ? Math.round(((onTrack*100 + atRisk*50 + complete*100) / (total*100)) * 100) : null;
+    return { week, onTrack, atRisk, blocked, complete, total, score };
   });
 }
 
@@ -2017,31 +2023,53 @@ function buildCharts() {
     </svg>`;
   }
 
-  // RAG trend chart (Executive Overview)
+  // Health Score Line chart (Executive Overview)
   const ragTrendEl = document.getElementById('rag-trend-chart');
   if (ragTrendEl) {
     const td = ragTrendData();
     if (td.length) {
+      const scores = td.map(d => d.score);
       const labels = td.map(d => shortDate(d.week));
+      const latestScore = scores[scores.length-1] ?? 50;
+      const scoreCol = latestScore >= 70 ? '#29BA74' : latestScore >= 40 ? '#F89862' : '#E71C57';
+      const badge = document.getElementById('health-score-badge');
+      if (badge) { badge.textContent = latestScore + '%'; badge.style.color = scoreCol; }
+      const ctx = ragTrendEl.getContext('2d');
+      const gradFill = ctx.createLinearGradient(0, 0, 0, 140);
+      gradFill.addColorStop(0, 'rgba(41,186,116,0.3)');
+      gradFill.addColorStop(0.5, 'rgba(248,152,98,0.15)');
+      gradFill.addColorStop(1, 'rgba(231,28,87,0.04)');
       state.charts['rag-trend'] = new Chart(ragTrendEl, {
-        type: 'bar',
-        data: {
-          labels,
-          datasets: [
-            { label:'On Track', data: td.map(d=>d.onTrack),  backgroundColor:'rgba(41,186,116,.75)',  borderRadius:3 },
-            { label:'At Risk',  data: td.map(d=>d.atRisk),   backgroundColor:'rgba(248,152,98,.75)',  borderRadius:3 },
-            { label:'Blocked',  data: td.map(d=>d.blocked),  backgroundColor:'rgba(231,28,87,.75)',   borderRadius:3 },
-            { label:'Complete', data: td.map(d=>d.complete), backgroundColor:'rgba(48,193,215,.75)',  borderRadius:3 },
-          ]
-        },
+        type: 'line',
+        data: { labels, datasets: [{ label:'Health Score', data: scores,
+          borderColor: scoreCol, backgroundColor: gradFill,
+          borderWidth: 2.5, pointRadius: 5,
+          pointBackgroundColor: scores.map(s => s>=70 ? '#29BA74' : s>=40 ? '#F89862' : '#E71C57'),
+          pointBorderColor: '#fff', pointBorderWidth: 1.5, tension: 0.4, fill: true }] },
         options: {
-          responsive:true, maintainAspectRatio:false,
-          plugins:{ legend:{ position:'bottom', labels:{ color:cd.color, boxWidth:10, font:{size:10} } }, tooltip:{mode:'index',intersect:false} },
-          scales:{
-            x:{ stacked:true, grid:{color:cd.grid}, ticks:{color:cd.color,font:{size:10}} },
-            y:{ stacked:true, grid:{color:cd.grid}, ticks:{color:cd.color,font:{size:10},stepSize:1}, min:0 }
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: {
+              label: c => 'Health: ' + c.raw + '%',
+              afterLabel: c => { const d=td[c.dataIndex]; return 'On Track:'+d.onTrack+'  At Risk:'+d.atRisk+'  Blocked:'+d.blocked+'  Complete:'+d.complete; }
+            }}
+          },
+          scales: {
+            x: { grid:{color:cd.grid}, ticks:{color:cd.color,font:{size:10}} },
+            y: { min:0, max:100, grid:{color:cd.grid}, ticks:{color:cd.color,font:{size:10},callback:v=>v+'%'} }
           }
-        }
+        },
+        plugins: [{ id:'healthZones', beforeDraw(chart) {
+          const {ctx:c, chartArea:ca} = chart;
+          if (!ca) return;
+          const ys = chart.scales.y;
+          c.save();
+          c.fillStyle='rgba(41,186,116,0.07)';  c.fillRect(ca.left, ca.top, ca.right-ca.left, ys.getPixelForValue(70)-ca.top);
+          c.fillStyle='rgba(248,152,98,0.07)';   c.fillRect(ca.left, ys.getPixelForValue(70), ca.right-ca.left, ys.getPixelForValue(40)-ys.getPixelForValue(70));
+          c.fillStyle='rgba(231,28,87,0.07)';    c.fillRect(ca.left, ys.getPixelForValue(40), ca.right-ca.left, ca.bottom-ys.getPixelForValue(40));
+          c.restore();
+        }}]
       });
     }
   }
