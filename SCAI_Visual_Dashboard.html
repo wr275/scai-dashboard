@@ -1604,11 +1604,26 @@ function pageExecutive() {
       </div>
     </div>
     <div class="card trend-card" style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
         <div class="card-title" style="margin-bottom:0">Portfolio Health Score &mdash; Week-on-Week</div>
         <div id="health-score-badge" style="font-size:28px;font-weight:900;line-height:1"></div>
       </div>
-      <div style="font-size:10px;opacity:0.45;margin-bottom:10px">On Track = 100 &nbsp;&middot;&nbsp; At Risk = 50 &nbsp;&middot;&nbsp; Blocked = 0 &nbsp;&middot;&nbsp; Complete = 100</div>
+      <div style="font-size:10px;opacity:0.5;margin-bottom:8px">Aggregate of all ${s.total} projects across all verticals &nbsp;&middot;&nbsp; Score = weighted RAG status per week</div>
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;flex-wrap:wrap">
+        <span style="display:flex;align-items:center;gap:5px;font-size:10px">
+          <span style="display:inline-block;width:28px;height:8px;border-radius:3px;background:rgba(41,186,116,0.35);border:1px solid #29BA74"></span>
+          <span style="opacity:0.7">Healthy &ge;70%</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:5px;font-size:10px">
+          <span style="display:inline-block;width:28px;height:8px;border-radius:3px;background:rgba(248,152,98,0.35);border:1px solid #F89862"></span>
+          <span style="opacity:0.7">At Risk 40–69%</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:5px;font-size:10px">
+          <span style="display:inline-block;width:28px;height:8px;border-radius:3px;background:rgba(231,28,87,0.35);border:1px solid #E71C57"></span>
+          <span style="opacity:0.7">Critical &lt;40%</span>
+        </span>
+        <span style="font-size:10px;opacity:0.4;margin-left:auto">On Track=100 &middot; At Risk=50 &middot; Blocked=0 &middot; Complete=100</span>
+      </div>
       <canvas id="rag-trend-chart" height="140"></canvas>
     </div>
     <div class="section-sep">All Projects &mdash; ${s.total} projects</div>
