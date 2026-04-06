@@ -1291,7 +1291,6 @@ async function apiUploadFiles(fileList) {
     let msg = '✓ Saved ' + result.saved + ' file' + (result.saved > 1 ? 's' : '') + ' · ' + np + ' project' + (np !== 1 ? 's' : '') + ' on server';
     if (result.errors > 0) msg += ' · ' + result.errors + ' error' + (result.errors > 1 ? 's' : '');
     showToast(msg, 7000);
-    checkDataFreshness();
   } catch (e) {
     showToast('Upload failed: ' + e.message, 7000);
     console.error('API upload error:', e);
@@ -2388,7 +2387,6 @@ function handleFiles(fileList) {
       let msg = `✓ Loaded ${projects.length} project${projects.length>1?'s':''} · ${totalMs} milestones · ${totalUpd} weekly updates`;
       if (smartCount > 0) msg += ` · ${smartCount} auto-detected`;
       showToast(msg, 6000);
-      checkDataFreshness();
     } else {
       showUploadError('Could not read any project data from these files.', [
         'Use the template files (download from the upload panel)',
