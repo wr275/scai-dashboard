@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <style>
 :root[data-theme="dark"] {
   --bg-primary:   #070810;
@@ -521,6 +522,10 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-primary);color
 .af-project:hover{text-decoration:underline;}
 .af-meta{font-size:10px;color:var(--text-muted);margin-top:2px;}
 .af-change{display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;margin-left:4px;}
+
+/* ── GANTT CHART ── */
+.gantt-wrap{position:relative;overflow-x:auto;margin-top:8px;}
+.gantt-today-label{position:absolute;top:0;font-size:9px;color:var(--status-blocked);font-weight:700;transform:translateX(-50%);pointer-events:none;z-index:2;}
 
 /* ── FORM VALIDATION ── */
 .update-form-input.has-error{border-color:var(--status-blocked);box-shadow:0 0 0 2px rgba(231,28,87,.12);}
@@ -1353,6 +1358,145 @@ function renderMilestoneTimeline(proj) {
       <div class="ms-pills">${pills}</div>
     </div>`;
   }).join('');
+}
+
+function buildGanttChart(proj) {
+  if (!proj.milestones || !proj.milestones.length) return '';
+  const canvasId = 'gantt-' + proj.id;
+  const height = Math.max(180, proj.milestones.length * 36 + 60);
+  return `
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">&#128197; Gantt Chart</div>
+      <div class="gantt-wrap">
+        <canvas id="${canvasId}" height="${height}"></canvas>
+      </div>
+    </div>`;
+}
+
+function renderGanttChart(proj) {
+  if (!proj.milestones || !proj.milestones.length) return;
+  const canvasId = 'gantt-' + proj.id;
+  const el = document.getElementById(canvasId);
+  if (!el) return;
+  const cd = chartDefaults();
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+
+  // Sort milestones by target date
+  const sorted = [...proj.milestones].sort((a,b) => a.targetDate.localeCompare(b.targetDate));
+
+  // Derive start dates: first milestone starts at project start, rest start at prev target
+  const projStart = proj.startDate || sorted[0].targetDate;
+  const bars = sorted.map((m, i) => {
+    const startStr = i === 0 ? projStart : sorted[i-1].targetDate;
+    const start = new Date(startStr);
+    const end = new Date(m.targetDate);
+    const st = getMsStatus(proj, m.id);
+    return { name: m.name, start, end, status: st, phaseTag: m.phaseTag };
+  });
+
+  // Determine chart time range
+  const allDates = bars.flatMap(b => [b.start, b.end]);
+  const minDate = new Date(Math.min(...allDates));
+  const maxDate = new Date(Math.max(...allDates));
+  // Add padding
+  minDate.setDate(minDate.getDate() - 7);
+  maxDate.setDate(maxDate.getDate() + 14);
+
+  const labels = bars.map(b => b.name.length > 28 ? b.name.slice(0,26)+'…' : b.name);
+
+  // Phase colors
+  const phaseColors = {
+    'Planning': 'rgba(79,142,247,0.75)',
+    'Execution': 'rgba(248,152,98,0.85)',
+    'Review & Approval': 'rgba(176,97,245,0.75)',
+    'Deployment': 'rgba(16,196,168,0.8)',
+    'Closed': 'rgba(48,193,215,0.7)'
+  };
+  const statusBorders = {
+    'Complete': '#29BA74',
+    'In Progress': '#C9A84C',
+    'Not Started': 'transparent'
+  };
+
+  const bgColors = bars.map(b => {
+    if (b.status === 'Complete') return 'rgba(41,186,116,0.5)';
+    return phaseColors[b.phaseTag] || 'rgba(154,154,154,0.5)';
+  });
+  const borderColors = bars.map(b => statusBorders[b.status] || 'transparent');
+
+  const data = bars.map(b => [b.start.getTime(), b.end.getTime()]);
+
+  state.charts[canvasId] = new Chart(el, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: data,
+        backgroundColor: bgColors,
+        borderColor: borderColors,
+        borderWidth: bars.map(b => b.status === 'Complete' ? 2 : (b.status === 'In Progress' ? 2 : 0)),
+        borderRadius: 4,
+        borderSkipped: false,
+        barPercentage: 0.6
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label(ctx) {
+              const b = bars[ctx.dataIndex];
+              const fmt = d => d.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'2-digit'});
+              return `${fmt(b.start)} → ${fmt(b.end)}  [${b.status}]`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'time',
+          time: { unit: 'week', displayFormats: { week: 'dd MMM' } },
+          min: minDate.getTime(),
+          max: maxDate.getTime(),
+          ticks: { color: cd.textColor, font: { size: 9 }, maxRotation: 0 },
+          grid: { color: cd.gridColor }
+        },
+        y: {
+          ticks: { color: cd.textColor, font: { size: 10 } },
+          grid: { display: false }
+        }
+      }
+    },
+    plugins: [{
+      id: 'todayLine',
+      afterDraw(chart) {
+        const xScale = chart.scales.x;
+        const todayX = xScale.getPixelForValue(today.getTime());
+        if (todayX >= xScale.left && todayX <= xScale.right) {
+          const ctx = chart.ctx;
+          ctx.save();
+          ctx.strokeStyle = '#E71C57';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.moveTo(todayX, chart.chartArea.top);
+          ctx.lineTo(todayX, chart.chartArea.bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#E71C57';
+          ctx.font = 'bold 9px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('Today', todayX, chart.chartArea.top - 4);
+          ctx.restore();
+        }
+      }
+    }]
+  });
 }
 
 // ─── NAVIGATION ────────────────────────────────────────────────────────────────
@@ -2335,6 +2479,7 @@ function pageProject(proj) {
         ${renderMilestoneTimeline(proj)}
       </div>
     </div>
+    ${buildGanttChart(proj)}
 
     ${upd ? `
     <div class="three-col">
@@ -2514,6 +2659,8 @@ function buildCharts() {
           });
         }
       }
+      // Gantt chart for milestones
+      renderGanttChart(proj);
     }
   }
 }
