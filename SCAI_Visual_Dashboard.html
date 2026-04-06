@@ -492,6 +492,35 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-primary);color
   .upload-btn, .theme-toggle, .tt-option { display:none !important; }
 }
 .print-header { display:none; }
+
+/* ── RAG TREND CHART ── */
+.trend-card{margin-bottom:14px;}
+.trend-card canvas{max-height:180px;}
+
+/* ── WEEKLY SUMMARY PAGE ── */
+.ws-header{background:var(--dark-navy,#1A1A2E);color:#C9A84C;padding:18px 24px;border-radius:10px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;}
+.ws-header-title{font-size:20px;font-weight:800;letter-spacing:.5px;}
+.ws-header-sub{font-size:12px;opacity:.7;margin-top:3px;}
+.ws-kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px;}
+.ws-kpi{background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;padding:12px 14px;text-align:center;}
+.ws-kpi-val{font-size:26px;font-weight:900;line-height:1.1;}
+.ws-kpi-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);margin-top:3px;}
+.ws-section{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-muted);margin:16px 0 8px;padding-bottom:4px;border-bottom:1px solid var(--border-color);}
+.ws-table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px;}
+.ws-table th{text-align:left;padding:7px 10px;background:var(--bg-card);border:1px solid var(--border-color);font-weight:700;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.6px;}
+.ws-table td{padding:7px 10px;border:1px solid var(--border-color);vertical-align:middle;}
+.ws-table tr:nth-child(even) td{background:var(--bg-card);}
+.ws-blocker-row{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border-color);}
+.ws-blocker-row:last-child{border-bottom:none;}
+.ws-achieve-item{padding:5px 0;border-bottom:1px solid var(--border-color);font-size:12px;}
+.ws-achieve-item:last-child{border-bottom:none;}
+.ws-print-btn{background:var(--gold-primary);color:#1A1A2E;border:none;padding:8px 18px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer;margin-left:10px;}
+.ws-print-btn:hover{opacity:.85;}
+@media print {
+  .topnav,.sidebar,.ws-print-btn{display:none!important;}
+  .content-area{margin:0!important;padding:0!important;}
+  .ws-header{background:#1A1A2E!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+}
 </style>
 </head>
 <body>
@@ -528,6 +557,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-primary);color
   <div class="topnav-right">
     <div class="week-label" id="weekLabel">Loading...</div>
     <div id="serverBadge" class="server-badge" style="display:none"></div>
+    <button class="upload-btn" onclick="nav('weekly-summary')" style="border-color:var(--gold-primary);color:var(--gold-primary)">&#128203; Weekly Report</button>
     <button class="upload-btn" onclick="exportPDF()" style="border-color:var(--text-muted);color:var(--text-muted)">&#8595; Export PDF</button>
     <button class="upload-btn" onclick="openUpload()">&#8593; Upload Excel</button>
     <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()">
@@ -1423,6 +1453,7 @@ function renderPage() {
   const pg = state.page;
   let html = '';
   if (pg==='executive') html = pageExecutive();
+  else if (pg==='weekly-summary') html = pageWeeklySummary();
   else if (pg.startsWith('v-')) {
     const v = VERTICALS.find(x => vertPageId(x)===pg);
     html = v ? pageVertical(v) : '<div class="empty">Vertical not found.</div>';
@@ -1572,8 +1603,120 @@ function pageExecutive() {
         ${blockersHtml}
       </div>
     </div>
+    <div class="card trend-card" style="margin-bottom:14px">
+      <div class="card-title">Portfolio RAG Trend &mdash; Week-on-Week Health</div>
+      <canvas id="rag-trend-chart" height="160"></canvas>
+    </div>
     <div class="section-sep">All Projects &mdash; ${s.total} projects</div>
     <div class="projects-grid">${projectCards}</div>`;
+}
+
+// ─── WEEKLY BOARD SUMMARY PAGE ─────────────────────────────────────────────────
+function pageWeeklySummary() {
+  const s   = portfolioStats();
+  const blkrs = activeBlockers();
+  const allProjs = state.projects;
+  const weekLbl  = getWeekLabel();
+
+  // Vertical summary rows
+  const vertRows = VERTICALS.map(v => {
+    const pjs = projectsForVertical(v);
+    if (!pjs.length) return '';
+    const avg = vertAvgPct(v);
+    const vs  = verticalStatus(v);
+    const col = STATUS_COLORS[vs]||'#9A9A9A';
+    const blk = pjs.filter(p=>calcRAG(p)==='Blocked').length;
+    const atr = pjs.filter(p=>calcRAG(p)==='At Risk').length;
+    const onT = pjs.filter(p=>calcRAG(p)==='On Track').length;
+    const don = pjs.filter(p=>calcRAG(p)==='Complete').length;
+    const owner = VERTICAL_OWNERS[v]||'—';
+    return `<tr>
+      <td style="font-weight:600">${v}</td>
+      <td style="text-align:center">${pjs.length}</td>
+      <td style="text-align:center;font-weight:700;color:${col}">${avg}%</td>
+      <td style="text-align:center"><span class="rag-badge ${RAG_CLASS[vs]||'rag-grey'}">${vs}</span></td>
+      <td style="font-size:11px;color:var(--text-muted)">${owner}</td>
+      <td style="font-size:11px">${blk?'<span style="color:var(--status-blocked)">'+blk+' blocked</span> ':''}${atr?'<span style="color:var(--status-at-risk)">'+atr+' at risk</span> ':''}${onT?'<span style="color:var(--status-on-track)">'+onT+' on track</span> ':''}${don?'<span style="color:var(--status-complete)">'+don+' done</span>':''}</td>
+    </tr>`;
+  }).join('');
+
+  // Blockers
+  const blockersHtml = blkrs.length===0
+    ? '<div class="empty">No active blockers this week ✓</div>'
+    : blkrs.map(({p,u})=>`<div class="ws-blocker-row">
+        <span style="color:var(--status-blocked);font-size:16px">⚠</span>
+        <div>
+          <div style="font-weight:700;font-size:13px">${p.name} <span style="font-size:10px;color:var(--text-muted)">(${p.vertical})</span></div>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">${u.blockerDetail||'Blocker flagged — details pending'}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Owner: ${p.owner}</div>
+        </div>
+      </div>`).join('');
+
+  // Achievements: latest thisWeek from each project
+  const achievements = allProjs.flatMap(p => {
+    const updates = [...(p.weeklyUpdates||[])].sort((a,b)=>b.weekDate.localeCompare(a.weekDate));
+    const latest = updates[0];
+    if (!latest || !latest.thisWeek) return [];
+    return [{ proj: p.name, text: latest.thisWeek, date: latest.weekDate }];
+  }).slice(0, 8);
+
+  const achievementsHtml = achievements.length===0
+    ? '<div class="empty">No updates submitted yet</div>'
+    : achievements.map(a=>`<div class="ws-achieve-item">
+        <span style="font-weight:600;color:var(--text-primary)">${a.proj}</span>
+        <span style="color:var(--text-muted);margin:0 6px">·</span>
+        <span style="color:var(--text-secondary)">${a.text}</span>
+      </div>`).join('');
+
+  // Milestones due next 14 days
+  const upcoming = upcomingMilestones(allProjs, 14);
+  const msHtml = upcoming.length===0
+    ? '<div class="empty">No milestones due in the next 14 days</div>'
+    : `<table class="ws-table"><thead><tr><th>Milestone</th><th>Project</th><th>Vertical</th><th>Due Date</th><th>Status</th></tr></thead><tbody>
+        ${upcoming.map(({p,m,d,daysLeft})=>{
+          const cls = daysLeft<0?'var(--status-blocked)':daysLeft<=7?'var(--status-at-risk)':'var(--text-primary)';
+          const lbl = daysLeft<0?Math.abs(daysLeft)+'d overdue':daysLeft===0?'Today':daysLeft+'d left';
+          return `<tr><td style="font-weight:600">${m.name}</td><td>${p.name}</td><td style="font-size:11px;color:var(--text-muted)">${p.vertical}</td><td style="color:${cls};font-weight:700">${shortDateLabel(d)}<br><span style="font-size:10px">${lbl}</span></td><td>${ragBadge(calcRAG(p))}</td></tr>`;
+        }).join('')}
+      </tbody></table>`;
+
+  return `
+    <div class="ws-header">
+      <div>
+        <div class="ws-header-title">📋 SCAI Weekly Portfolio Report</div>
+        <div class="ws-header-sub">${weekLbl} &nbsp;·&nbsp; New Murabba Development Company &nbsp;·&nbsp; Smart City &amp; AI</div>
+      </div>
+      <div>
+        <button class="ws-print-btn" onclick="window.print()">🖨 Print / Save PDF</button>
+      </div>
+    </div>
+
+    <div class="ws-kpi-row">
+      <div class="ws-kpi"><div class="ws-kpi-val" style="color:var(--gold-primary)">${s.total}</div><div class="ws-kpi-lbl">Total Projects</div></div>
+      <div class="ws-kpi"><div class="ws-kpi-val" style="color:var(--status-on-track)">${s.onTrack}</div><div class="ws-kpi-lbl">On Track</div></div>
+      <div class="ws-kpi"><div class="ws-kpi-val" style="color:var(--status-at-risk)">${s.atRisk}</div><div class="ws-kpi-lbl">At Risk</div></div>
+      <div class="ws-kpi"><div class="ws-kpi-val" style="color:var(--status-blocked)">${s.blocked}</div><div class="ws-kpi-lbl">Blocked</div></div>
+      <div class="ws-kpi"><div class="ws-kpi-val" style="color:var(--status-complete)">${s.complete}</div><div class="ws-kpi-lbl">Complete</div></div>
+    </div>
+
+    <div class="ws-section">Vertical Summary</div>
+    <table class="ws-table">
+      <thead><tr><th>Vertical</th><th>Projects</th><th>Avg Progress</th><th>Status</th><th>Owner</th><th>Breakdown</th></tr></thead>
+      <tbody>${vertRows}</tbody>
+    </table>
+
+    <div class="ws-section">Active Blockers Requiring Escalation</div>
+    ${blockersHtml}
+
+    <div class="ws-section">This Week's Key Achievements</div>
+    ${achievementsHtml}
+
+    <div class="ws-section">Milestones Due in Next 14 Days</div>
+    ${msHtml}
+
+    <div style="margin-top:24px;text-align:center;font-size:10px;color:var(--text-muted);padding-top:12px;border-top:1px solid var(--border-color)">
+      Generated by SCAI Visual Analytics &nbsp;·&nbsp; ${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} &nbsp;·&nbsp; Confidential
+    </div>`;
 }
 
 // ─── VERTICAL PAGE ─────────────────────────────────────────────────────────────
@@ -1594,6 +1737,26 @@ function upcomingMilestones(projs, days=14) {
     .sort((a,b) => a.d - b.d)
     .slice(0, 6);
 }
+function ragTrendData() {
+  const weekSet = new Set();
+  state.projects.forEach(p => (p.weeklyUpdates||[]).forEach(u => { if(u.weekDate) weekSet.add(u.weekDate); }));
+  const weeks = [...weekSet].sort().slice(-10);
+  return weeks.map(week => {
+    let onTrack=0, atRisk=0, blocked=0, complete=0;
+    state.projects.forEach(p => {
+      const upd = (p.weeklyUpdates||[]).find(u=>u.weekDate===week);
+      if (!upd) return;
+      const rag = upd.ragOverride || (upd.hasBlocker ? 'Blocked' : 'On Track');
+      if (rag==='On Track') onTrack++;
+      else if (rag==='At Risk') atRisk++;
+      else if (rag==='Blocked') blocked++;
+      else if (rag==='Complete') complete++;
+      else onTrack++;
+    });
+    return { week, onTrack, atRisk, blocked, complete };
+  });
+}
+
 function shortDateLabel(d) {
   return d.toLocaleDateString('en-GB', {day:'numeric', month:'short'});
 }
@@ -1852,6 +2015,35 @@ function buildCharts() {
       <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--ring-track)" stroke-width="${sw}"/>
       ${circles}
     </svg>`;
+  }
+
+  // RAG trend chart (Executive Overview)
+  const ragTrendEl = document.getElementById('rag-trend-chart');
+  if (ragTrendEl) {
+    const td = ragTrendData();
+    if (td.length) {
+      const labels = td.map(d => shortDate(d.week));
+      state.charts['rag-trend'] = new Chart(ragTrendEl, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            { label:'On Track', data: td.map(d=>d.onTrack),  backgroundColor:'rgba(41,186,116,.75)',  borderRadius:3 },
+            { label:'At Risk',  data: td.map(d=>d.atRisk),   backgroundColor:'rgba(248,152,98,.75)',  borderRadius:3 },
+            { label:'Blocked',  data: td.map(d=>d.blocked),  backgroundColor:'rgba(231,28,87,.75)',   borderRadius:3 },
+            { label:'Complete', data: td.map(d=>d.complete), backgroundColor:'rgba(48,193,215,.75)',  borderRadius:3 },
+          ]
+        },
+        options: {
+          responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{ position:'bottom', labels:{ color:cd.color, boxWidth:10, font:{size:10} } }, tooltip:{mode:'index',intersect:false} },
+          scales:{
+            x:{ stacked:true, grid:{color:cd.grid}, ticks:{color:cd.color,font:{size:10}} },
+            y:{ stacked:true, grid:{color:cd.grid}, ticks:{color:cd.color,font:{size:10},stepSize:1}, min:0 }
+          }
+        }
+      });
+    }
   }
 
   // Project trend chart

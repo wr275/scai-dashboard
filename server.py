@@ -5,10 +5,15 @@ Local:  python server.py            → http://localhost:8000
 Cloud:  set env vars, platform auto-starts via Procfile
 
 Environment variables (all optional — sensible defaults apply):
-  PORT          Port to listen on (cloud platforms set this automatically)
-  DATA_DIR      Where to store DB + uploads (default: ~/SCAI_Dashboard_Data)
-  DASHBOARD_PWD Password to protect the dashboard (default: no password)
-  DASHBOARD_USR Username for basic auth (default: scai)
+  PORT             Port to listen on (cloud platforms set this automatically)
+  DATA_DIR         Where to store DB + uploads (default: ~/SCAI_Dashboard_Data)
+  DASHBOARD_PWD    Password to protect the dashboard (default: no password)
+  DASHBOARD_USR    Username for basic auth (default: scai)
+  EMAIL_FROM       Gmail address to send from (e.g. you@gmail.com)
+  EMAIL_APP_PWD    Gmail App Password (16-char, spaces removed)
+  SCAI_HEAD_EMAIL  Recipient for weekly summary email
+  OWNER_EMAILS     JSON mapping vertical→email e.g. {"ICT":"m@nmdc.sa","AI & Data":"a@nmdc.sa"}
+  DASHBOARD_URL    Public URL of this dashboard (for email links)
 
 Requires: pip install fastapi uvicorn openpyxl python-multipart
 """
@@ -19,6 +24,9 @@ import sqlite3
 import shutil
 import logging
 import secrets
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from datetime import datetime
 from pathlib import Path
 from contextlib import contextmanager
@@ -61,6 +69,18 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 AUTH_USER = os.environ.get('DASHBOARD_USR', 'scai')
 AUTH_PWD  = os.environ.get('DASHBOARD_PWD', '')   # empty = no auth
 AUTH_ON   = bool(AUTH_PWD)
+
+# Email config (optional — only active when EMAIL_FROM + EMAIL_APP_PWD are set)
+EMAIL_FROM      = os.environ.get('EMAIL_FROM', '')
+EMAIL_APP_PWD   = os.environ.get('EMAIL_APP_PWD', '').replace(' ', '')
+SCAI_HEAD_EMAIL = os.environ.get('SCAI_HEAD_EMAIL', EMAIL_FROM)
+DASHBOARD_URL   = os.environ.get('DASHBOARD_URL', 'https://web-production-228d9.up.railway.app')
+_owner_emails_raw = os.environ.get('OWNER_EMAILS', '{}')
+try:
+    OWNER_EMAILS = json.loads(_owner_emails_raw)
+except Exception:
+    OWNER_EMAILS = {}
+EMAIL_ON = bool(EMAIL_FROM and EMAIL_APP_PWD)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('scai')
@@ -305,6 +325,181 @@ async def api_status():
         'authEnabled': AUTH_ON,
         'serverTime': datetime.utcnow().isoformat(),
     }
+
+
+# ── Email helpers ─────────────────────────────────────────────────────────────
+def send_email(to: str, subject: str, html_body: str):
+    """Send an HTML email via Gmail SMTP. Raises if email not configured."""
+    if not EMAIL_ON:
+        raise RuntimeError('Email not configured. Set EMAIL_FROM and EMAIL_APP_PWD env vars.')
+    msg = MIMEMultipart('alternative')
+    msg['From']    = EMAIL_FROM
+    msg['To']      = to
+    msg['Subject'] = subject
+    msg.attach(MIMEText(html_body, 'html'))
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+        server.login(EMAIL_FROM, EMAIL_APP_PWD)
+        server.sendmail(EMAIL_FROM, to, msg.as_string())
+
+
+def build_weekly_summary_html(projects: list) -> str:
+    """Generate a clean HTML email body for the weekly portfolio summary."""
+    total = len(projects)
+    by_rag = {'On Track': 0, 'At Risk': 0, 'Blocked': 0, 'Complete': 0}
+    blockers = []
+    achievements = []
+    vertical_summaries = {}
+
+    for p in projects:
+        updates = sorted(p.get('weeklyUpdates', []), key=lambda u: u.get('weekDate',''))
+        latest  = updates[-1] if updates else None
+        rag     = latest.get('ragOverride') or ('Blocked' if latest and latest.get('hasBlocker') else 'On Track') if latest else 'Not Started'
+        by_rag[rag] = by_rag.get(rag, 0) + 1
+
+        v = p.get('vertical', 'Unknown')
+        if v not in vertical_summaries:
+            vertical_summaries[v] = {'total': 0, 'blocked': 0, 'at_risk': 0, 'on_track': 0}
+        vertical_summaries[v]['total'] += 1
+        if rag == 'Blocked':  vertical_summaries[v]['blocked'] += 1
+        elif rag == 'At Risk': vertical_summaries[v]['at_risk'] += 1
+        else:                  vertical_summaries[v]['on_track'] += 1
+
+        if latest and latest.get('hasBlocker') and latest.get('blockerDetail'):
+            blockers.append({'project': p.get('name',''), 'vertical': v,
+                             'owner': p.get('owner',''), 'detail': latest['blockerDetail']})
+        if latest and latest.get('thisWeek'):
+            achievements.append({'project': p.get('name',''), 'text': latest['thisWeek']})
+
+    week_str = datetime.utcnow().strftime('%d %b %Y')
+    rag_color = {'On Track':'#29BA74','At Risk':'#F89862','Blocked':'#E71C57','Complete':'#30C1D7'}
+
+    rows_vert = ''.join(
+        f'<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;font-weight:600">{v}</td>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center">{d["total"]}</td>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid #eee;color:#E71C57;text-align:center">{d["blocked"] or "—"}</td>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid #eee;color:#F89862;text-align:center">{d["at_risk"] or "—"}</td>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid #eee;color:#29BA74;text-align:center">{d["on_track"] or "—"}</td>'
+        f'</tr>'
+        for v, d in vertical_summaries.items()
+    )
+    rows_blockers = ''.join(
+        f'<li style="margin-bottom:8px"><strong>{b["project"]}</strong> ({b["vertical"]})<br>'
+        f'<span style="color:#555">{b["detail"]}</span><br>'
+        f'<span style="color:#999;font-size:12px">Owner: {b["owner"]}</span></li>'
+        for b in blockers
+    ) or '<li style="color:#29BA74">No active blockers this week ✓</li>'
+
+    rows_achieve = ''.join(
+        f'<li style="margin-bottom:6px"><strong>{a["project"]}</strong>: {a["text"]}</li>'
+        for a in achievements[:8]
+    ) or '<li>No updates submitted yet</li>'
+
+    kpi_cells = ''.join(
+        f'<td style="text-align:center;padding:12px 16px">'
+        f'<div style="font-size:28px;font-weight:900;color:{rag_color.get(k,\"#9A9A9A\")}">{v}</div>'
+        f'<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#999;margin-top:3px">{k}</div>'
+        f'</td>'
+        for k, v in by_rag.items()
+    )
+
+    return f"""
+<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;background:#f5f5f5">
+<table width="100%" cellpadding="0" cellspacing="0">
+  <tr><td style="background:#1A1A2E;padding:24px 28px">
+    <div style="color:#C9A84C;font-size:20px;font-weight:800">SCAI Weekly Portfolio Report</div>
+    <div style="color:#C9A84C;opacity:.6;font-size:12px;margin-top:4px">Week of {week_str} &nbsp;·&nbsp; New Murabba Development Company</div>
+  </td></tr>
+  <tr><td style="background:#fff;padding:20px 28px">
+    <table width="100%" style="border-collapse:collapse;margin-bottom:20px">
+      <tr style="background:#f9f9f9">{kpi_cells}
+        <td style="text-align:center;padding:12px 16px">
+          <div style="font-size:28px;font-weight:900;color:#C9A84C">{total}</div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#999;margin-top:3px">Total</div>
+        </td>
+      </tr>
+    </table>
+    <h3 style="color:#1A1A2E;border-bottom:2px solid #C9A84C;padding-bottom:6px">Vertical Summary</h3>
+    <table width="100%" style="border-collapse:collapse;font-size:13px">
+      <tr style="background:#f9f9f9">
+        <th style="padding:8px 12px;text-align:left">Vertical</th>
+        <th style="padding:8px 12px">Projects</th>
+        <th style="padding:8px 12px;color:#E71C57">Blocked</th>
+        <th style="padding:8px 12px;color:#F89862">At Risk</th>
+        <th style="padding:8px 12px;color:#29BA74">On Track</th>
+      </tr>{rows_vert}
+    </table>
+    <h3 style="color:#1A1A2E;border-bottom:2px solid #E71C57;padding-bottom:6px;margin-top:20px">⚠ Active Blockers</h3>
+    <ul style="padding-left:18px;font-size:13px">{rows_blockers}</ul>
+    <h3 style="color:#1A1A2E;border-bottom:2px solid #29BA74;padding-bottom:6px;margin-top:20px">✅ This Week's Achievements</h3>
+    <ul style="padding-left:18px;font-size:13px">{rows_achieve}</ul>
+    <div style="margin-top:24px;text-align:center">
+      <a href="{DASHBOARD_URL}" style="background:#C9A84C;color:#1A1A2E;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:700;font-size:13px">View Full Dashboard →</a>
+    </div>
+  </td></tr>
+  <tr><td style="background:#1A1A2E;padding:12px 28px;text-align:center">
+    <div style="color:#C9A84C;opacity:.5;font-size:10px">SCAI Visual Analytics · Confidential · {datetime.utcnow().strftime("%d %b %Y")}</div>
+  </td></tr>
+</table></body></html>"""
+
+
+@app.post('/api/send-weekly-report', dependencies=[Depends(require_auth)])
+async def api_send_weekly_report():
+    """Send the weekly portfolio summary email to the SCAI head."""
+    if not EMAIL_ON:
+        raise HTTPException(400, 'Email not configured. Set EMAIL_FROM and EMAIL_APP_PWD in Railway env vars.')
+    if not SCAI_HEAD_EMAIL:
+        raise HTTPException(400, 'SCAI_HEAD_EMAIL not configured.')
+    projects = get_all_projects()
+    html = build_weekly_summary_html(projects)
+    week_str = datetime.utcnow().strftime('%d %b %Y')
+    subject = f'SCAI Weekly Portfolio Report — Week of {week_str}'
+    send_email(SCAI_HEAD_EMAIL, subject, html)
+    log.info(f'Weekly report sent to {SCAI_HEAD_EMAIL}')
+    return {'sent': True, 'to': SCAI_HEAD_EMAIL, 'subject': subject}
+
+
+@app.post('/api/send-reminders', dependencies=[Depends(require_auth)])
+async def api_send_reminders():
+    """Send reminder emails to project owners to submit their weekly update."""
+    if not EMAIL_ON:
+        raise HTTPException(400, 'Email not configured. Set EMAIL_FROM and EMAIL_APP_PWD in Railway env vars.')
+    if not OWNER_EMAILS:
+        raise HTTPException(400, 'OWNER_EMAILS not configured. Set as JSON in Railway env vars.')
+
+    week_str = datetime.utcnow().strftime('%d %b %Y')
+    sent, errors = [], []
+    for vertical, email in OWNER_EMAILS.items():
+        projects = [p for p in get_all_projects() if p.get('vertical') == vertical]
+        proj_list = ''.join(f'<li>{p.get("name","")}</li>' for p in projects)
+        html = f"""
+<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+<table width="100%"><tr><td style="background:#1A1A2E;padding:20px 24px">
+  <div style="color:#C9A84C;font-size:18px;font-weight:800">Weekly Update Reminder</div>
+  <div style="color:#C9A84C;opacity:.6;font-size:12px">SCAI Portfolio Dashboard · {week_str}</div>
+</td></tr>
+<tr><td style="padding:24px;background:#fff">
+  <p style="font-size:14px;color:#333">Hi,</p>
+  <p style="font-size:14px;color:#333">This is your weekly reminder to submit progress updates for your <strong>{vertical}</strong> projects before end of day today.</p>
+  <p style="font-size:13px;color:#555">Your projects:</p>
+  <ul style="font-size:13px;color:#333">{proj_list}</ul>
+  <p style="font-size:13px;color:#555">Please upload your <strong>WeeklyReport.xlsx</strong> file via the dashboard:</p>
+  <div style="text-align:center;margin:20px 0">
+    <a href="{DASHBOARD_URL}" style="background:#C9A84C;color:#1A1A2E;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:700;font-size:13px">Open Dashboard →</a>
+  </div>
+  <p style="font-size:11px;color:#999">If you have already submitted your update this week, please disregard this message.</p>
+</td></tr>
+<tr><td style="background:#1A1A2E;padding:10px 24px;text-align:center">
+  <div style="color:#C9A84C;opacity:.4;font-size:10px">SCAI Visual Analytics · New Murabba Development Company</div>
+</td></tr></table></body></html>"""
+        try:
+            send_email(email, f'[Action Required] Weekly Project Update — {week_str}', html)
+            sent.append({'vertical': vertical, 'email': email})
+            log.info(f'Reminder sent to {email} ({vertical})')
+        except Exception as e:
+            errors.append({'vertical': vertical, 'email': email, 'error': str(e)})
+            log.warning(f'Failed to send reminder to {email}: {e}')
+
+    return {'sent': len(sent), 'errors': len(errors), 'details': sent, 'errorDetails': errors}
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
