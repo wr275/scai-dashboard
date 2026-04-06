@@ -508,12 +508,6 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-primary);color
 .skeleton-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px;}
 .skeleton-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;}
 
-/* ── NOTIFICATION BADGES ── */
-.nav-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;
-  border-radius:8px;font-size:9px;font-weight:800;padding:0 4px;margin-left:auto;flex-shrink:0;}
-.nav-badge-red{background:rgba(231,28,87,.18);color:#E71C57;}
-.nav-badge-amber{background:rgba(248,152,98,.18);color:#F89862;}
-.nav-badge-stale{background:rgba(154,154,154,.15);color:var(--text-muted);font-size:8px;}
 
 /* ── ACTIVITY FEED ── */
 .activity-feed{max-height:260px;overflow-y:auto;}
@@ -1374,27 +1368,11 @@ function nav(page) {
   renderPage();
   document.getElementById('content').scrollTop = 0;
 }
-function isProjectStale(p) {
-  if (!p.updates || !p.updates.length) return true;
-  const latest = p.updates.reduce((a,b) => a.weekDate > b.weekDate ? a : b);
-  const d = new Date(latest.weekDate);
-  const now = new Date();
-  return (now - d) > 10 * 86400000; // >10 days = stale
-}
-
 function renderSidebar() {
   const sb = document.getElementById('sidebar');
   const pg = state.page;
-
-  // Count portfolio-wide badges
-  const allBlocked = state.projects.filter(p => calcRAG(p)==='Blocked').length;
-  const allStale   = state.projects.filter(p => isProjectStale(p) && calcRAG(p)!=='Complete').length;
-  let execBadge = '';
-  if (allBlocked) execBadge = `<span class="nav-badge nav-badge-red">${allBlocked}</span>`;
-  else if (allStale) execBadge = `<span class="nav-badge nav-badge-stale">${allStale}</span>`;
-
   let h = `<div class="nav-item${pg==='executive'?' active':''}" onclick="nav('executive')">
-    <span>&#127968;</span> Executive Overview ${execBadge}
+    <span>&#127968;</span> Executive Overview
   </div>`;
   h += `<div class="nav-label">Verticals</div>`;
   VERTICALS.forEach(v => {
@@ -1403,14 +1381,6 @@ function renderSidebar() {
     const col  = VERTICAL_COLORS[v]||'#9A9A9A';
     const projs = projectsForVertical(v);
     const isOpen = pg===pid || projs.some(p => pg==='p-'+p.id);
-
-    // Vertical-level badge
-    const vBlocked = projs.filter(p => calcRAG(p)==='Blocked').length;
-    const vStale   = projs.filter(p => isProjectStale(p) && calcRAG(p)!=='Complete').length;
-    let vBadge = '';
-    if (vBlocked) vBadge = `<span class="nav-badge nav-badge-red">${vBlocked}</span>`;
-    else if (vStale) vBadge = `<span class="nav-badge nav-badge-amber">${vStale}</span>`;
-
     h += `<div class="vgroup${isOpen?' expanded':''}" id="vg-${pid}">`;
     h += `<div class="nav-item nav-vertical${pg===pid?' active':''}" onclick="toggleVGroup('${pid}');nav('${pid}')">
       <span class="nav-dot" style="background:${col}"></span>
@@ -1418,21 +1388,15 @@ function renderSidebar() {
         <span style="display:block">${v}</span>
         <span style="display:block;font-size:10px;opacity:0.65;font-weight:400;margin-top:1px">${VERTICAL_OWNERS[v]||''}</span>
       </span>
-      ${vBadge}
       <span class="nav-chevron">&#8250;</span>
     </div>`;
     h += `<div class="nav-sub">`;
     projs.forEach(p => {
       const rag = calcRAG(p);
       const pcol = STATUS_COLORS[rag]||'#9A9A9A';
-      const stale = isProjectStale(p) && rag!=='Complete';
-      let pBadge = '';
-      if (rag==='Blocked') pBadge = `<span class="nav-badge nav-badge-red" title="Blocked">!</span>`;
-      else if (stale) pBadge = `<span class="nav-badge nav-badge-stale" title="No update this week">&bull;</span>`;
       h += `<div class="nav-item nav-project${pg==='p-'+p.id?' active':''}" onclick="nav('p-${p.id}')">
         <span class="nav-dot" style="background:${pcol}"></span>
-        <span style="flex:1">${p.name}</span>
-        ${pBadge}
+        <span>${p.name}</span>
       </div>`;
     });
     h += `</div></div>`;
