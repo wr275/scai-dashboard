@@ -524,8 +524,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-primary);color
 .af-change{display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;margin-left:4px;}
 
 /* ── GANTT CHART ── */
-.gantt-wrap{position:relative;overflow-x:auto;margin-top:8px;}
-.gantt-today-label{position:absolute;top:0;font-size:9px;color:var(--status-blocked);font-weight:700;transform:translateX(-50%);pointer-events:none;z-index:2;}
+.gantt-wrap{position:relative;overflow-x:auto;}
 
 /* ── FORM VALIDATION ── */
 .update-form-input.has-error{border-color:var(--status-blocked);box-shadow:0 0 0 2px rgba(231,28,87,.12);}
@@ -1363,12 +1362,24 @@ function renderMilestoneTimeline(proj) {
 function buildGanttChart(proj) {
   if (!proj.milestones || !proj.milestones.length) return '';
   const canvasId = 'gantt-' + proj.id;
-  const height = Math.max(180, proj.milestones.length * 36 + 60);
+  const n = proj.milestones.length;
+  const height = Math.max(140, n * 26 + 50);
+  // Phase legend
+  const phases = [
+    {l:'Planning',c:'#4F8EF7'},{l:'Execution',c:'#F89862'},{l:'Review',c:'#B061F5'},
+    {l:'Deploy',c:'#10C4A8'},{l:'Closed',c:'#30C1D7'},{l:'Done',c:'#29BA74'}
+  ];
+  const legend = phases.map(p =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;font-size:9px;color:var(--text-muted)"><span style="width:10px;height:6px;border-radius:2px;background:${p.c};display:inline-block"></span>${p.l}</span>`
+  ).join('&ensp;');
   return `
-    <div class="card" style="margin-top:14px">
-      <div class="card-title">&#128197; Gantt Chart</div>
-      <div class="gantt-wrap">
-        <canvas id="${canvasId}" height="${height}"></canvas>
+    <div class="card" style="margin-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+        <div class="card-title" style="margin-bottom:0">Milestone Timeline</div>
+        <div>${legend}</div>
+      </div>
+      <div class="gantt-wrap" style="height:${height}px">
+        <canvas id="${canvasId}"></canvas>
       </div>
     </div>`;
 }
@@ -1380,50 +1391,51 @@ function renderGanttChart(proj) {
   if (!el) return;
   const cd = chartDefaults();
   const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
 
-  // Sort milestones by target date
   const sorted = [...proj.milestones].sort((a,b) => a.targetDate.localeCompare(b.targetDate));
-
-  // Derive start dates: first milestone starts at project start, rest start at prev target
   const projStart = proj.startDate || sorted[0].targetDate;
+
   const bars = sorted.map((m, i) => {
     const startStr = i === 0 ? projStart : sorted[i-1].targetDate;
     const start = new Date(startStr);
     const end = new Date(m.targetDate);
     const st = getMsStatus(proj, m.id);
-    return { name: m.name, start, end, status: st, phaseTag: m.phaseTag };
+    const overdue = st !== 'Complete' && end < today;
+    return { name: m.name, start, end, status: st, phaseTag: m.phaseTag, overdue };
   });
 
-  // Determine chart time range
   const allDates = bars.flatMap(b => [b.start, b.end]);
   const minDate = new Date(Math.min(...allDates));
   const maxDate = new Date(Math.max(...allDates));
-  // Add padding
-  minDate.setDate(minDate.getDate() - 7);
-  maxDate.setDate(maxDate.getDate() + 14);
+  minDate.setDate(minDate.getDate() - 5);
+  maxDate.setDate(maxDate.getDate() + 10);
 
-  const labels = bars.map(b => b.name.length > 28 ? b.name.slice(0,26)+'…' : b.name);
-
-  // Phase colors
   const phaseColors = {
-    'Planning': 'rgba(79,142,247,0.75)',
-    'Execution': 'rgba(248,152,98,0.85)',
-    'Review & Approval': 'rgba(176,97,245,0.75)',
-    'Deployment': 'rgba(16,196,168,0.8)',
-    'Closed': 'rgba(48,193,215,0.7)'
+    'Planning':'rgba(79,142,247,0.7)','Execution':'rgba(248,152,98,0.8)',
+    'Review & Approval':'rgba(176,97,245,0.7)','Deployment':'rgba(16,196,168,0.75)','Closed':'rgba(48,193,215,0.65)'
   };
-  const statusBorders = {
-    'Complete': '#29BA74',
-    'In Progress': '#C9A84C',
-    'Not Started': 'transparent'
-  };
+
+  const fmt = d => d.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+
+  // Build label with status icon
+  const labels = bars.map(b => {
+    const icon = b.status==='Complete' ? '\u2713 ' : b.status==='In Progress' ? '\u25B6 ' : b.overdue ? '\u26A0 ' : '';
+    const nm = b.name.length > 24 ? b.name.slice(0,22)+'\u2026' : b.name;
+    return icon + nm;
+  });
 
   const bgColors = bars.map(b => {
-    if (b.status === 'Complete') return 'rgba(41,186,116,0.5)';
-    return phaseColors[b.phaseTag] || 'rgba(154,154,154,0.5)';
+    if (b.status==='Complete') return 'rgba(41,186,116,0.55)';
+    if (b.overdue) return 'rgba(231,28,87,0.35)';
+    return phaseColors[b.phaseTag] || 'rgba(154,154,154,0.4)';
   });
-  const borderColors = bars.map(b => statusBorders[b.status] || 'transparent');
+  const borderColors = bars.map(b => {
+    if (b.status==='Complete') return '#29BA74';
+    if (b.status==='In Progress') return '#C9A84C';
+    if (b.overdue) return '#E71C57';
+    return 'transparent';
+  });
+  const borderWidths = bars.map(b => (b.status==='Complete'||b.status==='In Progress'||b.overdue) ? 1.5 : 0);
 
   const data = bars.map(b => [b.start.getTime(), b.end.getTime()]);
 
@@ -1432,27 +1444,38 @@ function renderGanttChart(proj) {
     data: {
       labels,
       datasets: [{
-        data: data,
+        data,
         backgroundColor: bgColors,
         borderColor: borderColors,
-        borderWidth: bars.map(b => b.status === 'Complete' ? 2 : (b.status === 'In Progress' ? 2 : 0)),
-        borderRadius: 4,
+        borderWidth: borderWidths,
+        borderRadius: 3,
         borderSkipped: false,
-        barPercentage: 0.6
+        barPercentage: 0.55,
+        categoryPercentage: 0.85
       }]
     },
     options: {
       indexAxis: 'y',
       responsive: true,
       maintainAspectRatio: false,
+      layout: { padding: { top: 2, bottom: 0, left: 0, right: 0 } },
       plugins: {
         legend: { display: false },
         tooltip: {
+          backgroundColor: 'rgba(30,30,40,0.92)',
+          titleFont: { size: 11, weight: '600' },
+          bodyFont: { size: 10 },
+          padding: 8,
+          cornerRadius: 6,
           callbacks: {
+            title(items) { return bars[items[0].dataIndex].name; },
             label(ctx) {
               const b = bars[ctx.dataIndex];
-              const fmt = d => d.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'2-digit'});
-              return `${fmt(b.start)} → ${fmt(b.end)}  [${b.status}]`;
+              return [
+                `${fmt(b.start)} \u2192 ${fmt(b.end)}`,
+                `Phase: ${b.phaseTag}`,
+                `Status: ${b.status}${b.overdue ? ' (overdue)' : ''}`
+              ];
             }
           }
         }
@@ -1460,38 +1483,49 @@ function renderGanttChart(proj) {
       scales: {
         x: {
           type: 'time',
-          time: { unit: 'week', displayFormats: { week: 'dd MMM' } },
+          time: { unit: 'month', displayFormats: { month: 'MMM yy', week: 'dd MMM' } },
           min: minDate.getTime(),
           max: maxDate.getTime(),
           ticks: { color: cd.textColor, font: { size: 9 }, maxRotation: 0 },
-          grid: { color: cd.gridColor }
+          grid: { color: cd.gridColor, lineWidth: 0.5 }
         },
         y: {
-          ticks: { color: cd.textColor, font: { size: 10 } },
+          ticks: {
+            color(ctx) {
+              const b = bars[ctx.index];
+              if (!b) return cd.textColor;
+              if (b.status==='Complete') return '#29BA74';
+              if (b.overdue) return '#E71C57';
+              return cd.textColor;
+            },
+            font: { size: 9.5 }
+          },
           grid: { display: false }
         }
       }
     },
     plugins: [{
       id: 'todayLine',
-      afterDraw(chart) {
+      afterDatasetsDraw(chart) {
         const xScale = chart.scales.x;
         const todayX = xScale.getPixelForValue(today.getTime());
         if (todayX >= xScale.left && todayX <= xScale.right) {
           const ctx = chart.ctx;
+          const area = chart.chartArea;
           ctx.save();
           ctx.strokeStyle = '#E71C57';
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([4, 3]);
+          ctx.lineWidth = 1.2;
+          ctx.setLineDash([3, 2]);
           ctx.beginPath();
-          ctx.moveTo(todayX, chart.chartArea.top);
-          ctx.lineTo(todayX, chart.chartArea.bottom);
+          ctx.moveTo(todayX, area.top);
+          ctx.lineTo(todayX, area.bottom);
           ctx.stroke();
           ctx.setLineDash([]);
+          // Draw label INSIDE chart area, below top edge
           ctx.fillStyle = '#E71C57';
-          ctx.font = 'bold 9px Inter, sans-serif';
+          ctx.font = 'bold 8px Inter, sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('Today', todayX, chart.chartArea.top - 4);
+          ctx.fillText('TODAY', todayX, area.top + 10);
           ctx.restore();
         }
       }
