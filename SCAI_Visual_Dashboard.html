@@ -523,6 +523,40 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-primary);color
 .af-meta{font-size:10px;color:var(--text-muted);margin-top:2px;}
 .af-change{display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;margin-left:4px;}
 
+/* ── AI FEATURES ── */
+.ai-card{position:relative;overflow:hidden;}
+.ai-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#C9A84C,#4F8EF7,#B061F5,#10C4A8,#EC4899);opacity:0.7;}
+.ai-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:6px;border:1px solid var(--gold-primary);
+  background:linear-gradient(135deg,rgba(201,168,76,.08),rgba(201,168,76,.02));color:var(--gold-primary);
+  font-size:11px;font-weight:600;cursor:pointer;transition:all .2s;}
+.ai-btn:hover{background:linear-gradient(135deg,rgba(201,168,76,.18),rgba(201,168,76,.06));transform:translateY(-1px);}
+.ai-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
+.ai-btn .ai-spark{font-size:13px;}
+.ai-summary-content{font-size:12.5px;line-height:1.7;color:var(--text-primary);white-space:pre-wrap;}
+.ai-summary-content p{margin:0 0 8px 0;}
+.ai-loading{display:flex;align-items:center;gap:8px;padding:16px 0;color:var(--text-muted);font-size:12px;}
+.ai-loading-dot{width:6px;height:6px;border-radius:50%;background:var(--gold-primary);animation:aiBounce .6s ease-in-out infinite alternate;}
+.ai-loading-dot:nth-child(2){animation-delay:.15s;}
+.ai-loading-dot:nth-child(3){animation-delay:.3s;}
+@keyframes aiBounce{from{opacity:.3;transform:translateY(0)}to{opacity:1;transform:translateY(-4px)}}
+.ai-timestamp{font-size:9px;color:var(--text-muted);margin-top:6px;}
+.risk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:10px;}
+.risk-item{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:8px;border:1px solid var(--border-color);
+  background:var(--bg-card);transition:all .2s;}
+.risk-item:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.08);}
+.risk-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:3px;}
+.risk-dot-high{background:#E71C57;}
+.risk-dot-medium{background:#F89862;}
+.risk-dot-low{background:#29BA74;}
+.risk-name{font-size:11px;font-weight:700;color:var(--text-primary);}
+.risk-signal{font-size:10px;color:var(--text-muted);margin-top:2px;}
+.risk-meta{display:flex;gap:8px;align-items:center;margin-top:3px;font-size:9px;}
+.risk-badge{padding:1px 6px;border-radius:3px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;}
+.risk-badge-high{background:rgba(231,28,87,.12);color:#E71C57;}
+.risk-badge-medium{background:rgba(248,152,98,.12);color:#F89862;}
+.risk-badge-low{background:rgba(41,186,116,.12);color:#29BA74;}
+.risk-trend{font-size:9px;color:var(--text-muted);}
+
 /* ── GANTT CHART ── */
 .gantt-wrap{position:relative;overflow-x:auto;}
 
@@ -1835,6 +1869,90 @@ async function apiSubmitUpdate(projId, weekDate) {
   }
 }
 
+// ─── AI FEATURES ────────────────────────────────────────────────────────────
+function aiLoadingHtml() {
+  return `<div class="ai-loading">
+    <div class="ai-loading-dot"></div><div class="ai-loading-dot"></div><div class="ai-loading-dot"></div>
+    <span>Analysing portfolio data…</span>
+  </div>`;
+}
+
+function formatAISummary(text) {
+  // Convert **bold** to <strong> and newlines to proper formatting
+  let html = text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^- /gm, '• ')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+  return `<p>${html}</p>`;
+}
+
+async function generateAISummary() {
+  const btn = document.getElementById('ai-summary-btn');
+  const body = document.getElementById('ai-summary-body');
+  if (!btn || !body) return;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="ai-spark">&#10024;</span> Generating…';
+  body.innerHTML = aiLoadingHtml();
+  try {
+    const resp = await fetch('/api/ai/executive-summary', { method: 'POST' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const ts = new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
+    body.innerHTML = `<div class="ai-summary-content">${formatAISummary(data.summary)}</div>
+      <div class="ai-timestamp">Generated at ${ts} today</div>`;
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--status-blocked);font-size:11px;padding:12px 0">Failed to generate summary: ${e.message}</div>`;
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<span class="ai-spark">&#10024;</span> Regenerate';
+}
+
+async function generateRiskPrediction() {
+  const btn = document.getElementById('ai-risk-btn');
+  const body = document.getElementById('ai-risk-body');
+  if (!btn || !body) return;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="ai-spark">&#10024;</span> Analysing…';
+  body.innerHTML = aiLoadingHtml();
+  try {
+    const resp = await fetch('/api/ai/risk-prediction', { method: 'POST' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const predictions = (data.predictions || []).sort((a,b) => (b.score||0) - (a.score||0));
+    if (!predictions.length) {
+      body.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:12px 0">No predictions available.</div>';
+    } else {
+      const trendIcons = { rising:'&#9650;', stable:'&#9679;', falling:'&#9660;' };
+      const trendColors = { rising:'#E71C57', stable:'#F89862', falling:'#29BA74' };
+      const items = predictions.map(p => {
+        const proj = state.projects.find(x => x.id === p.id);
+        const name = proj ? proj.name : p.id;
+        const tIcon = trendIcons[p.trend] || '&#9679;';
+        const tCol = trendColors[p.trend] || 'var(--text-muted)';
+        return `<div class="risk-item" onclick="if(event.target.tagName!=='BUTTON')nav('p-${p.id}')" style="cursor:pointer">
+          <div class="risk-dot risk-dot-${p.risk}"></div>
+          <div style="flex:1">
+            <div class="risk-name">${name}</div>
+            <div class="risk-signal">${p.signal}</div>
+            <div class="risk-meta">
+              <span class="risk-badge risk-badge-${p.risk}">${p.risk} · ${p.score}</span>
+              <span class="risk-trend" style="color:${tCol}">${tIcon} ${p.trend}</span>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+      const ts = new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
+      body.innerHTML = `<div class="risk-grid">${items}</div>
+        <div class="ai-timestamp">Predicted at ${ts} today</div>`;
+    }
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--status-blocked);font-size:11px;padding:12px 0">Failed to generate predictions: ${e.message}</div>`;
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<span class="ai-spark">&#10024;</span> Re-analyse';
+}
+
 function updateServerBadge(connected) {
   const el = document.getElementById('serverBadge');
   if (!el) return;
@@ -2114,6 +2232,31 @@ function pageExecutive() {
       <div class="kpi-box kpi-red"><div class="kpi-label">Blocked</div><div class="kpi-val" style="color:var(--status-blocked)">${s.blocked}</div><div class="kpi-sub">Requires escalation</div></div>
       <div class="kpi-box kpi-gold"><div class="kpi-label">Avg Progress</div><div class="kpi-val" style="color:var(--gold-primary)">${s.avgPct}%</div><div class="kpi-sub">Portfolio completion</div></div>
     </div>
+    ${IS_API_MODE ? `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+      <div class="card ai-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div class="card-title" style="margin-bottom:0">AI Executive Briefing</div>
+          <button class="ai-btn" onclick="generateAISummary()" id="ai-summary-btn">
+            <span class="ai-spark">&#10024;</span> Generate Briefing
+          </button>
+        </div>
+        <div id="ai-summary-body">
+          <div style="font-size:11px;color:var(--text-muted);padding:12px 0">Click "Generate Briefing" to get an AI-powered portfolio analysis based on latest weekly updates.</div>
+        </div>
+      </div>
+      <div class="card ai-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div class="card-title" style="margin-bottom:0">AI Risk Predictor</div>
+          <button class="ai-btn" onclick="generateRiskPrediction()" id="ai-risk-btn">
+            <span class="ai-spark">&#10024;</span> Analyse Risks
+          </button>
+        </div>
+        <div id="ai-risk-body">
+          <div style="font-size:11px;color:var(--text-muted);padding:12px 0">Click "Analyse Risks" to get AI-powered risk predictions for each project.</div>
+        </div>
+      </div>
+    </div>` : ''}
     <div class="exec-grid">
       <div class="card">
         <div class="card-title">Portfolio Health</div>

@@ -15,7 +15,7 @@ Environment variables (all optional — sensible defaults apply):
   OWNER_EMAILS     JSON mapping vertical→email e.g. {"ICT":"m@nmdc.sa","AI & Data":"a@nmdc.sa"}
   DASHBOARD_URL    Public URL of this dashboard (for email links)
 
-Requires: pip install fastapi uvicorn openpyxl python-multipart
+Requires: pip install fastapi uvicorn openpyxl python-multipart anthropic
 """
 
 import os
@@ -86,6 +86,10 @@ try:
 except Exception:
     OWNER_EMAILS = {}
 EMAIL_ON = bool(EMAIL_FROM and EMAIL_APP_PWD)
+
+# AI config (optional — enables AI summary and risk prediction)
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+AI_ON = bool(ANTHROPIC_API_KEY)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('scai')
@@ -600,6 +604,164 @@ async def startup():
     log.info(f'  Auth      : {"ON (user=" + AUTH_USER + ")" if AUTH_ON else "OFF — set DASHBOARD_PWD to enable"}')
     log.info(f'  Port      : {PORT}')
     log.info('─' * 50)
+
+
+# ── AI Endpoints ─────────────────────────────────────────────────────────────
+
+@app.post('/api/ai/executive-summary', dependencies=[Depends(require_auth)])
+async def ai_executive_summary():
+    """Generate AI-powered executive briefing from latest weekly updates."""
+    if not AI_ON:
+        raise HTTPException(503, 'AI features disabled — set ANTHROPIC_API_KEY')
+
+    import anthropic
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    # Gather all projects with their latest updates
+    with get_db() as conn:
+        rows = conn.execute('SELECT id, data FROM projects').fetchall()
+
+    if not rows:
+        return JSONResponse({'summary': 'No project data available for analysis.'})
+
+    projects_context = []
+    for pid, data_json in rows:
+        p = json.loads(data_json)
+        updates = sorted(p.get('weeklyUpdates', []), key=lambda u: u.get('weekDate', ''), reverse=True)
+        latest = updates[0] if updates else None
+        prev = updates[1] if len(updates) > 1 else None
+        ms_tracker = p.get('milestoneTracker', [])
+        done_ms = sum(1 for m in ms_tracker if m.get('status') == 'Complete')
+        total_ms = len(ms_tracker)
+        projects_context.append({
+            'name': p.get('name'),
+            'vertical': p.get('vertical'),
+            'owner': p.get('owner'),
+            'startDate': p.get('startDate'),
+            'targetEnd': p.get('targetEnd'),
+            'milestoneProgress': f'{done_ms}/{total_ms}',
+            'latestUpdate': latest,
+            'previousUpdate': prev,
+        })
+
+    prompt = f"""You are an executive PMO analyst for New Murabba Development Company (NMDc), Smart City & AI department.
+
+Analyse the following project portfolio data and produce a concise executive briefing.
+
+PROJECTS:
+{json.dumps(projects_context, indent=2)}
+
+Write a briefing with these sections (use exactly these headings):
+**Portfolio Pulse** — 2-3 sentence overall health summary. Mention total projects, how many on track vs at risk vs blocked vs complete.
+**Key Wins This Week** — bullet list of 2-3 notable accomplishments across the portfolio.
+**Watch List** — bullet list of 2-3 projects or risks that need leadership attention, with specific reasons.
+**Recommended Actions** — 2-3 specific actionable recommendations for the SCAI Head.
+
+Keep it under 250 words. Be specific — cite project names, numbers, and dates. Write in professional executive tone. Do not use markdown headers (no #), just bold the section titles with **."""
+
+    try:
+        response = client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=600,
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        summary = response.content[0].text
+        return JSONResponse({'summary': summary})
+    except Exception as e:
+        log.error(f'AI summary failed: {e}')
+        raise HTTPException(500, f'AI generation failed: {str(e)}')
+
+
+@app.post('/api/ai/risk-prediction', dependencies=[Depends(require_auth)])
+async def ai_risk_prediction():
+    """AI-powered risk prediction for each project based on update patterns."""
+    if not AI_ON:
+        raise HTTPException(503, 'AI features disabled — set ANTHROPIC_API_KEY')
+
+    import anthropic
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    with get_db() as conn:
+        rows = conn.execute('SELECT id, data FROM projects').fetchall()
+
+    if not rows:
+        return JSONResponse({'predictions': []})
+
+    projects_context = []
+    for pid, data_json in rows:
+        p = json.loads(data_json)
+        updates = sorted(p.get('weeklyUpdates', []), key=lambda u: u.get('weekDate', ''), reverse=True)
+        ms_tracker = p.get('milestoneTracker', [])
+        milestones = p.get('milestones', [])
+
+        # Compute progress velocity
+        progress_values = []
+        for u in updates[:3]:
+            progress_values.append(u.get('progress', 0))
+
+        # Check overdue milestones
+        today = datetime.now().strftime('%Y-%m-%d')
+        overdue = []
+        for ms in milestones:
+            tracker = next((t for t in ms_tracker if t.get('milestoneId') == ms.get('id')), None)
+            if tracker and tracker.get('status') != 'Complete' and ms.get('targetDate', '9999') < today:
+                overdue.append(ms.get('name'))
+
+        blocker_streak = 0
+        for u in updates:
+            if u.get('hasBlocker'):
+                blocker_streak += 1
+            else:
+                break
+
+        projects_context.append({
+            'id': pid,
+            'name': p.get('name'),
+            'vertical': p.get('vertical'),
+            'owner': p.get('owner'),
+            'targetEnd': p.get('targetEnd'),
+            'recentUpdates': updates[:3],
+            'overdueMilestones': overdue,
+            'blockerStreak': blocker_streak,
+            'milestoneDone': sum(1 for m in ms_tracker if m.get('status') == 'Complete'),
+            'milestoneTotal': len(ms_tracker),
+        })
+
+    prompt = f"""You are a PMO risk analyst for New Murabba Development Company. Analyse each project and predict risk levels.
+
+PROJECTS:
+{json.dumps(projects_context, indent=2)}
+
+For each project, return a JSON array of objects with:
+- "id": project ID
+- "risk": "high", "medium", or "low"
+- "score": 0-100 (100 = highest risk)
+- "signal": one-line reason (max 15 words)
+- "trend": "rising", "stable", or "falling" (is risk increasing or decreasing?)
+
+Consider: blocker streaks (consecutive weeks with blockers), overdue milestones, slowing progress velocity, vague or repetitive update language, approaching deadlines with low completion.
+Projects that are already Complete should be "low" risk with score 0-5.
+
+Return ONLY the JSON array, no explanation or markdown."""
+
+    try:
+        response = client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=800,
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        text = response.content[0].text.strip()
+        # Parse JSON from response (handle markdown code blocks if present)
+        if text.startswith('```'):
+            text = text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
+        predictions = json.loads(text)
+        return JSONResponse({'predictions': predictions})
+    except json.JSONDecodeError:
+        log.error(f'AI risk prediction returned non-JSON: {text[:200]}')
+        return JSONResponse({'predictions': [], 'error': 'AI returned invalid format'})
+    except Exception as e:
+        log.error(f'AI risk prediction failed: {e}')
+        raise HTTPException(500, f'AI generation failed: {str(e)}')
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
