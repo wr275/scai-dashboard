@@ -352,16 +352,6 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-primary);color
 .override-note{font-size:11.5px;color:var(--gold-light);background:rgba(178,139,49,.08);
                border:1px solid rgba(178,139,49,.2);border-radius:6px;padding:8px 12px;margin-top:8px;}
 
-/* ── PHASE STEPPER ── */
-.phase-stepper{display:flex;align-items:center;gap:0;margin:14px 0;}
-.phase-step-el{flex:1;text-align:center;padding:8px 4px;font-size:10px;font-weight:500;
-               background:var(--bg-secondary);color:var(--text-muted);position:relative;}
-.phase-step-el::after{content:'▶';position:absolute;right:-8px;top:50%;transform:translateY(-50%);
-                       font-size:10px;color:var(--border-color);z-index:1;}
-.phase-step-el:last-child::after{display:none;}
-.phase-step-el.done{background:rgba(41,186,116,.08);color:var(--status-on-track);}
-.phase-step-el.current{background:rgba(178,139,49,.15);color:var(--gold-light);font-weight:700;
-                         border:1px solid rgba(178,139,49,.3);}
 
 /* ── MILESTONE TIMELINE ── */
 .ms-timeline{margin-top:14px;}
@@ -1216,10 +1206,6 @@ function phaseStepsHtml(ph) {
   const idx = phaseIdx(ph);
   return PHASES.map((p,i) => `<div class="ps${i<idx?' done':i===idx?' active':''}"></div>`).join('');
 }
-function phaseStepperHtml(ph) {
-  const idx = phaseIdx(ph);
-  return PHASES.map((p,i) => `<div class="phase-step-el${i<idx?' done':i===idx?' current':''}">${p}</div>`).join('');
-}
 function checkDataFreshness() {
   if (state.isDemo) { hideBanner(); return; }
   const today = new Date();
@@ -1353,10 +1339,6 @@ function shortDate(d) { try { return new Date(d).toLocaleDateString('en-GB',{day
 function vertPageId(v) { return 'v-'+v.replace(/[^a-z0-9]/gi,'-'); }
 function phaseIdx(ph) { return PHASES.indexOf(ph); }
 function ragBadge(status) { return `<span class="rag ${RAG_CLASS[status]||'rag-grey'}">${status||'Not Started'}</span>`; }
-function phaseStepperHtml(ph) {
-  const idx = phaseIdx(ph);
-  return PHASES.map((p,i) => `<div class="phase-step-el${i<idx?' done':i===idx?' current':''}">${p}</div>`).join('');
-}
 function destroyCharts() { Object.values(state.charts).forEach(c=>{try{c.destroy();}catch(e){}}); state.charts={}; }
 function chartDefaults() {
   const dark = state.theme==='dark';
@@ -2656,10 +2638,6 @@ function pageProject(proj) {
             })()}
           </div>
         </div>
-      </div>
-      <div>
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:6px">Project Phase</div>
-        <div class="phase-stepper">${phaseStepperHtml(ph)}</div>
       </div>
       <div class="ms-timeline">
         <div class="section-sep" style="margin-top:16px;margin-bottom:10px">Milestone Tracker</div>
