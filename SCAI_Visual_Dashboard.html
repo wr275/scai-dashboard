@@ -353,25 +353,26 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg-primary);color
                border:1px solid rgba(178,139,49,.2);border-radius:6px;padding:8px 12px;margin-top:8px;}
 
 
-/* ── MILESTONE TIMELINE ── */
-.ms-timeline{margin-top:14px;}
-.ms-phase-group{margin-bottom:12px;}
-.ms-phase-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;
-                color:var(--text-muted);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--border-color);}
-.ms-phase-label.active-ph{color:var(--gold-light);border-bottom-color:rgba(178,139,49,.3);}
-.ms-phase-label.done-ph{color:var(--status-on-track);}
-.ms-pills{display:flex;flex-wrap:wrap;gap:6px;}
-.ms-pill{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:6px;
-         border:1px solid var(--border-color);background:var(--bg-secondary);font-size:11px;transition:border-color .15s;}
-.ms-done{background:rgba(41,186,116,.06);border-color:rgba(41,186,116,.25);color:var(--status-on-track);}
-.ms-active{background:rgba(178,139,49,.1);border-color:rgba(178,139,49,.35);color:var(--gold-light);}
-.ms-overdue{background:rgba(231,28,87,.08);border-color:rgba(231,28,87,.3);color:var(--status-blocked);}
-.ms-upcoming{color:var(--text-muted);}
-.ms-pill-icon{font-size:9px;flex-shrink:0;}
-.ms-pill-name{font-weight:500;}
-.ms-pill-date{font-size:10px;color:var(--text-muted);margin-left:4px;}
-.ms-pill-wt{font-size:9px;color:var(--gold-light);background:rgba(178,139,49,.15);
-            padding:1px 4px;border-radius:3px;margin-left:2px;}
+/* ── MILESTONE TABLE ── */
+.ms-table-wrap{margin-top:14px;}
+.ms-table{width:100%;border-collapse:collapse;font-size:12px;}
+.ms-table thead th{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;
+                   color:var(--text-muted);padding:8px 10px;text-align:left;
+                   border-bottom:2px solid var(--border-color);white-space:nowrap;}
+.ms-table tbody td{padding:9px 10px;border-bottom:1px solid var(--border-color);
+                   color:var(--text-primary);vertical-align:middle;}
+.ms-table tbody tr:last-child td{border-bottom:none;}
+.ms-table tbody tr:hover{background:rgba(178,139,49,.04);}
+.ms-status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle;}
+.ms-dot-done{background:var(--status-on-track);}
+.ms-dot-active{background:var(--gold-light);}
+.ms-dot-overdue{background:var(--status-blocked);}
+.ms-dot-upcoming{background:var(--text-muted);opacity:.4;}
+.ms-status-text{font-size:11px;font-weight:500;}
+.ms-phase-tag{font-size:10px;color:var(--text-muted);background:var(--bg-secondary);
+              padding:2px 7px;border-radius:4px;white-space:nowrap;}
+.ms-wt-badge{font-size:9px;color:var(--gold-light);background:rgba(178,139,49,.15);
+             padding:1px 5px;border-radius:3px;margin-left:4px;}
 
 /* ── UPDATE BLOCKS ── */
 .update-block{background:var(--bg-card);border:1px solid var(--border-color);border-radius:10px;padding:16px;}
@@ -1346,43 +1347,38 @@ function chartDefaults() {
 }
 
 // ─── MILESTONE TIMELINE ────────────────────────────────────────────────────────
-function renderMilestoneTimeline(proj) {
+function renderMilestoneTable(proj) {
   if (!proj.milestones || !proj.milestones.length) return '';
   const today = new Date().toISOString().split('T')[0];
   const activeMs = getActiveMilestone(proj);
-  const byPhase = {};
-  PHASES.forEach(ph => { byPhase[ph] = []; });
-  proj.milestones.forEach(m => { if (byPhase[m.phaseTag]) byPhase[m.phaseTag].push(m); });
-  const usedPhases = PHASES.filter(ph => byPhase[ph].length);
-  const currentPh = getCurrentPhase(proj);
 
-  return usedPhases.map(ph => {
-    const ms = byPhase[ph];
-    const allDone = ms.every(m => getMsStatus(proj, m.id) === 'Complete');
-    const phClass = allDone ? 'done-ph' : (ph === currentPh ? 'active-ph' : '');
-    const pills = ms.map(m => {
-      const st = getMsStatus(proj, m.id);
-      const overdue = st !== 'Complete' && m.targetDate < today;
-      let pillClass = overdue ? 'ms-overdue' : (st === 'Not Started' ? 'ms-upcoming' : '');
-      let icon = '○';
-      if (st === 'Complete')                          { pillClass = 'ms-done';   icon = '✓'; }
-      else if (st === 'In Progress' || m === activeMs){ pillClass = 'ms-active'; icon = '▶'; }
-      const tracker = proj.milestoneTracker && proj.milestoneTracker.find(t=>t.milestoneId===m.id);
-      const dateStr = st==='Complete' && tracker && tracker.actualCompletionDate
-        ? shortDate(tracker.actualCompletionDate) + ' ✓'
-        : shortDate(m.targetDate) + (overdue?' ⚠':'');
-      const wtBadge = (m.weight||1)>1 ? `<span class="ms-pill-wt">×${m.weight}</span>` : '';
-      return `<div class="ms-pill ${pillClass}">
-        <span class="ms-pill-icon">${icon}</span>
-        <span class="ms-pill-name">${m.name}</span>
-        <span class="ms-pill-date">${dateStr}</span>${wtBadge}
-      </div>`;
-    }).join('');
-    return `<div class="ms-phase-group">
-      <div class="ms-phase-label ${phClass}">${ph}</div>
-      <div class="ms-pills">${pills}</div>
-    </div>`;
+  const rows = proj.milestones.map(m => {
+    const st = getMsStatus(proj, m.id);
+    const overdue = st !== 'Complete' && m.targetDate < today;
+    const tracker = proj.milestoneTracker && proj.milestoneTracker.find(t=>t.milestoneId===m.id);
+    const actualDate = st==='Complete' && tracker && tracker.actualCompletionDate
+      ? shortDate(tracker.actualCompletionDate) : '—';
+
+    let dotClass = 'ms-dot-upcoming', statusLabel = 'Not Started';
+    if (st === 'Complete')                           { dotClass = 'ms-dot-done';    statusLabel = 'Complete'; }
+    else if (overdue)                                { dotClass = 'ms-dot-overdue'; statusLabel = 'Overdue'; }
+    else if (st === 'In Progress' || m === activeMs) { dotClass = 'ms-dot-active';  statusLabel = 'In Progress'; }
+
+    const wtBadge = (m.weight||1)>1 ? `<span class="ms-wt-badge">×${m.weight}</span>` : '';
+
+    return `<tr>
+      <td style="font-weight:500">${m.name}${wtBadge}</td>
+      <td><span class="ms-phase-tag">${m.phaseTag}</span></td>
+      <td>${shortDate(m.targetDate)}${overdue?' <span style="color:var(--status-blocked)">⚠</span>':''}</td>
+      <td><span class="ms-status-dot ${dotClass}"></span><span class="ms-status-text">${statusLabel}</span></td>
+      <td>${actualDate}</td>
+    </tr>`;
   }).join('');
+
+  return `<table class="ms-table">
+    <thead><tr><th>Milestone</th><th>Phase</th><th>Target Date</th><th>Status</th><th>Completed</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
 }
 
 function buildGanttChart(proj) {
@@ -2639,11 +2635,7 @@ function pageProject(proj) {
           </div>
         </div>
       </div>
-      <div class="ms-timeline">
-        <div class="section-sep" style="margin-top:16px;margin-bottom:10px">Milestone Tracker</div>
-        ${renderMilestoneTimeline(proj)}
       </div>
-    </div>
     ${buildGanttChart(proj)}
 
     ${upd ? `
@@ -2679,6 +2671,13 @@ function pageProject(proj) {
             <tbody>${histRows||'<tr><td colspan="5" class="empty">No history available</td></tr>'}</tbody>
           </table>
         </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <div class="card-title">Milestone Tracker</div>
+      <div class="ms-table-wrap" style="overflow-x:auto">
+        ${renderMilestoneTable(proj)}
       </div>
     </div>`;
 }
